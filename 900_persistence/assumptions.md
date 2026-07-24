@@ -33,7 +33,7 @@
 **Fecha:** 2026-07-23
 **Supuesto:** las skills del Agent SDK se descubren desde los *setting sources* (típicamente `.claude/skills/` relativo al `cwd` del proceso). Como el harness (`sda`) correrá con el `cwd` del proyecto destino (no el del propio paquete `sda`), se está asumiendo, sin confirmar, que el SDK descubrirá igualmente las skills empaquetadas dentro de `src/sda/skills/`.
 **Riesgo si es falso:** si el SDK no descubre skills empaquetadas fuera del `cwd`, el diseño de `skills/` (ver D-016) requeriría un mecanismo adicional (copiar/enlazar skills al proyecto destino, o registrar setting sources adicionales) antes de poder comprometerse.
-**Estado:** vigente — requiere un spike de verificación dedicado (ref T-017) antes de comprometer el diseño final de `skills/`.
+**Estado:** RESUELTO/VERIFICADO (2026-07-24) — el riesgo era real. Spike T-017 confirmó en vivo que una skill "pelada" bajo `src/sda/skills/<n>/SKILL.md` NO se descubre desde un `cwd` externo (el modelo respondió `NO-LA-SE`), porque `skills` en `ClaudeAgentOptions` auto-configura `setting_sources=["user","project"]`, que solo miran `~/.claude/skills/` y `<cwd>/.claude/skills/`. El mecanismo que sí funciona es empaquetar las skills dentro de un plugin local (`plugins=[{"type":"local","path":...}]`), verificado con el mismo spike (el modelo respondió `SKILL-T017-PLUGIN-OK`). Ver D-016 (corregido), D-019, C-006.
 
 <!--
 ### A-001 — Título breve

@@ -1,0 +1,8 @@
+{
+  "name": "sda-spike-t017",
+  "description": "Plugin desechable del spike T-017 para verificar el descubrimiento de skills empaquetadas desde un cwd externo.",
+  "version": "0.0.1",
+  "author": {
+    "name": "TripleS"
+  }
+}

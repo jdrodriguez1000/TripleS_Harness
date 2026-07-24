@@ -32,6 +32,7 @@
 | T-018 | Ampliar session-start-protocol para que lea documentos de contexto en la raíz del proyecto (p. ej. idea.md) | No implementada |
 | T-019 | Configurar .gitignore, protocolo obligatorio de commit/push en session-closer, e inicializar repo git conectado a GitHub | Implementada |
 | T-020 | Persistir y reanudar conversaciones del harness entre ejecuciones (más allá de la memoria del proceso vivo) | No implementada |
+| T-021 | Promover a producción el plugin local de skills de sda (src/sda/plugin/, resolución con importlib, ClaudeSDKProvider.create_session con plugins/skills) | No implementada |
 
 ## Detalle de tareas
 
@@ -148,11 +149,11 @@ Creados `src/sda/providers/__init__.py` y `src/sda/providers/claude_sdk.py` con 
 Spike creado en `spikes/t016_sesion_persistente.py`: confirma que una misma `Session` (sin reconectar entre turnos) conserva el contexto de un turno a otro. Ejecutado en vivo dentro del repo con resultado exitoso: T1 "ok", T2 "Verde" (recordó que el color favorito mencionado en T1 era verde), assert de conservación de contexto pasó correctamente. Ver D-011.
 
 ### T-017 — Spike: verificación del descubrimiento de skills empaquetadas
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-23
-**Fecha actualización:** 2026-07-23
+**Fecha actualización:** 2026-07-24
 
-Spike de verificación de si el SDK descubre las skills empaquetadas dentro de `src/sda/skills/` cuando el harness corre con el `cwd` del proyecto destino (no el del propio paquete `sda`). Ver A-004 (riesgo abierto), D-011.
+Spike creado en `spikes/t017_skills_empaquetadas.py` con fixtures en `spikes/t017_fixtures/` (skill "pelada" en `skill_bare/color-secreto-bare/SKILL.md`; plugin local en `plugin/` con `.claude-plugin/plugin.json` + `skills/color-secreto-plugin/SKILL.md`). Ejecutado en vivo desde un `cwd` temporal EXTERNO (fuera de este repo, simulando el proyecto destino) con dos casos: (1) BASELINE — skill "pelada" estilo `src/sda/skills/<n>/SKILL.md` con `skills="all"` sin plugins → el modelo respondió `NO-LA-SE`, confirmando que NO se descubre desde un cwd externo; (2) PLUGIN — la misma skill empaquetada en un plugin local (`plugins=[{"type":"local","path":...}]`) → el modelo respondió `SKILL-T017-PLUGIN-OK`, confirmando que el plugin local SÍ expone la skill independientemente del cwd. Ambos asserts pasaron. Hallazgo verificado también contra la documentación oficial del SDK vía ctx7: el parámetro `skills` de `ClaudeAgentOptions` auto-configura `setting_sources=["user","project"]`, que solo miran `~/.claude/skills/` y `<cwd>/.claude/skills/`, no un directorio interno del paquete instalado. Resuelve A-004 (VERIFICADO) y obliga a corregir D-016 (ver D-016 corregido) y añadir D-019. El material de `spikes/t017_*` se deja en el repo por ahora (no se borra ni promueve todavía, conforme a D-011) para que el usuario pueda re-ejecutarlo; su borrado/promoción a producción queda para T-021.
 
 ### T-018 — Ampliar session-start-protocol para leer documentos de contexto en la raíz del proyecto
 **Estado:** No implementada
@@ -174,3 +175,10 @@ Se creó `.gitignore` en la raíz. Se actualizó la skill `.claude/skills/sessio
 **Fecha actualización:** 2026-07-24
 
 Durante T-016 se confirmó que la conversación multi-turno (contexto conservado entre turnos) funciona mientras el proceso Python está vivo, usando el mismo objeto `Session` sin reconectar. Pero esa conversación se pierde por completo al cerrar el proceso: hoy no existe ningún mecanismo que guarde el historial de mensajes en disco, ni un identificador de sesión/conversación que permita al SDK reconectar a la misma charla en una ejecución posterior. Todo vive en memoria del `ClaudeSDKClient` mientras el proceso corre. Falta investigar si el SDK subyacente soporta reanudar una conversación por `session_id` u otro mecanismo, y diseñar cómo se persistiría dicho estado (fuera del alcance de T-015/T-016). Nota: esto es distinto de la persistencia de `900_persistence/`, que es memoria del proyecto/harness en sí, no de las conversaciones que el harness genera con el modelo. Ver C-005.
+
+### T-021 — Promover a producción el plugin local de skills de sda
+**Estado:** No implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+Tarea derivada del hallazgo de T-017/D-019: crear el plugin real `src/sda/plugin/` (`.claude-plugin/plugin.json` + `skills/<nombre>/SKILL.md`) dentro del paquete `sda`, y la lógica que resuelve su ruta con `importlib` (en vez de una ruta de spike hardcodeada) para pasarla como `plugins=[{"type":"local","path":...}]` en las opciones del proveedor. Requiere ampliar `ClaudeSDKProvider.create_session` para aceptar/pasar `plugins` y `skills`. Fuera de alcance del spike (D-011): promoción a producción pendiente.

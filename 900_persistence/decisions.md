@@ -22,6 +22,7 @@
 - [D-016 — Estructura de carpetas del proyecto acordada](#d-016--estructura-de-carpetas-del-proyecto-acordada)
 - [D-017 — CLI con argparse (stdlib) y subcomando placeholder desde el esqueleto](#d-017--cli-con-argparse-stdlib-y-subcomando-placeholder-desde-el-esqueleto)
 - [D-018 — API asíncrona para Session/Provider y TurnResult como retorno del turno](#d-018--api-asíncrona-para-sessionprovider-y-turnresult-como-retorno-del-turno)
+- [D-019 — Las skills propias de sda se entregan mediante un plugin local único (corrige D-016)](#d-019--las-skills-propias-de-sda-se-entregan-mediante-un-plugin-local-único-corrige-d-016)
 
 ## Detalle
 
@@ -169,6 +170,7 @@ TripleS_Harness/
 **Razón:** materializar en carpetas concretas las decisiones D-008 a D-013.
 **Alternativas consideradas:** ninguna alternativa de estructura fue discutida en detalle; se acordó esta directamente.
 **Impacto:** ref T-012 a T-017 (tareas de construcción del primer incremento).
+**CORRECCIÓN (2026-07-24, ver D-019):** el nodo `skills/<nombre>/SKILL.md` suelto dentro de `src/sda/` de este diagrama queda INVALIDADO por el spike T-017: no es descubrible cuando el harness corre con el `cwd` del proyecto destino. Las skills de `sda` deben vivir dentro de un plugin local único (`src/sda/plugin/`), no como carpeta `skills/` suelta al mismo nivel que `core/`/`providers/`. Ver D-019.
 
 ### D-017 — CLI con argparse (stdlib) y subcomando placeholder desde el esqueleto
 **Fecha:** 2026-07-24
@@ -183,6 +185,13 @@ TripleS_Harness/
 **Razón:** el SDK subyacente (`claude_agent_sdk.ClaudeSDKClient`) es totalmente async (verificado en vivo: `connect`/`disconnect`/`query`/`receive_response` son `async`), y una sesión persistente con contexto entre turnos (spike T-016) requiere un cliente async de larga vida; esconder `anyio.run()` dentro de cada `send()` sync lo impediría. Un `TurnResult` (en vez de `str`) evita cambiar la firma del contrato cuando el evaluador del bucle interno necesite metadata (uso de tokens, mensajes crudos).
 **Alternativas consideradas:** API sync con `anyio.run()` escondido en cada `send()` (descartada: choca con la sesión persistente de T-016); que `send()` devuelva `str` simple (descartada: obligaría a romper el contrato al añadir observabilidad).
 **Impacto:** ref T-014. El puente sync→async (desde `cli.py::main`, que es sync) vivirá en `app.py` con `anyio.run(...)`, no en `core/`. T-015 implementará `send` sobre `client.query()` + `receive_response()` y `close` sobre `disconnect()`.
+
+### D-019 — Las skills propias de sda se entregan mediante un plugin local único (corrige D-016)
+**Fecha:** 2026-07-24
+**Decisión:** las skills propias de `sda` se entregan mediante un plugin local ÚNICO, cargado por ruta explícita (`plugins=[{"type":"local","path":...}]`), no vía descubrimiento por `cwd`. Es un solo plugin contenedor para todas las skills del harness (no uno por skill); agregar una skill nueva = agregar una carpeta `skills/<nombre>/SKILL.md` dentro de ese plugin (`src/sda/plugin/.claude-plugin/plugin.json` + `src/sda/plugin/skills/<nombre>/SKILL.md`). La ruta del plugin se resolverá dentro del paquete instalado con `importlib` cuando se promueva a producción (tarea futura T-021, fuera del alcance del spike, ver D-011). Costo conocido: los nombres de las skills quedan calificados como `plugin:skill` en vez de solo `skill`.
+**Razón:** el spike T-017 demostró en vivo que el layout "pelado" `src/sda/skills/<nombre>/SKILL.md` (D-016 original) no se descubre desde un `cwd` externo, porque `skills` en `ClaudeAgentOptions` auto-configura `setting_sources=["user","project"]`, que solo miran `~/.claude/skills/` y `<cwd>/.claude/skills/`, no un directorio interno de un paquete instalado. El mecanismo nativo que sí funciona independientemente del `cwd` es el plugin local.
+**Alternativas consideradas:** copiar/enlazar las skills al `.claude/skills/` del proyecto destino en tiempo de arranque (descartada: requeriría escritura en el proyecto destino y sincronización manual); registrar `setting_sources` adicionales apuntando al paquete instalado (descartada: no es una opción soportada por el SDK para rutas arbitrarias fuera de user/project); un plugin por skill en vez de un plugin único contenedor (descartada: más complejidad de manifiestos sin beneficio claro para el alcance actual).
+**Impacto:** ref T-017 (spike que lo confirmó), D-016 (corregido), A-004 (resuelto), T-021 (tarea de promoción a producción pendiente).
 
 <!--
 ### D-XXX — Título breve

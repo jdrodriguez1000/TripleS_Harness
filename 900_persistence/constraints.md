@@ -9,6 +9,7 @@
 - [C-003 — No se puede eliminar una variable de entorno heredada del subproceso del SDK, solo sobrescribirla](#c-003--no-se-puede-eliminar-una-variable-de-entorno-heredada-del-subproceso-del-sdk-solo-sobrescribirla)
 - [C-004 — Las skills son un filtro de contexto, no un sandbox de seguridad](#c-004--las-skills-son-un-filtro-de-contexto-no-un-sandbox-de-seguridad)
 - [C-005 — La conversación multi-turno vive solo en memoria del proceso, sin persistencia entre ejecuciones](#c-005--la-conversación-multi-turno-vive-solo-en-memoria-del-proceso-sin-persistencia-entre-ejecuciones)
+- [C-006 — Las skills empaquetadas dentro de sda solo se descubren vía plugin local, no por cwd](#c-006--las-skills-empaquetadas-dentro-de-sda-solo-se-descubren-vía-plugin-local-no-por-cwd)
 
 ## Detalle
 
@@ -36,6 +37,11 @@
 **Tipo:** técnica
 **Descripción:** `ClaudeSDKSession` conserva contexto entre turnos mientras el mismo objeto `Session`/`ClaudeSDKClient` sigue vivo dentro del proceso (verificado en T-016), pero no existe hoy ningún mecanismo que guarde el historial de mensajes en disco ni un `session_id` que permita al SDK reanudar la misma conversación en una ejecución posterior del harness. Al cerrar el proceso, la conversación se pierde por completo.
 **Origen:** observado durante la verificación en vivo de T-016 (spike de sesión persistente). Da origen a T-020 (persistir/reanudar conversaciones entre ejecuciones, pendiente).
+
+### C-006 — Las skills empaquetadas dentro de sda solo se descubren vía plugin local, no por cwd
+**Tipo:** técnica
+**Descripción:** el parámetro `skills` de `ClaudeAgentOptions` auto-configura `setting_sources=["user","project"]`, que solo escanean `~/.claude/skills/` (user) y `<cwd>/.claude/skills/` (project). Una skill "pelada" empaquetada dentro de `sda` (p. ej. `src/sda/skills/<n>/SKILL.md`) NO es descubierta cuando el harness corre con el `cwd` del proyecto destino, aunque el proceso se ejecute con el paquete `sda` instalado. El único mecanismo verificado que expone skills empaquetadas independientemente del `cwd` es un plugin local (`plugins=[{"type":"local","path":...}]`), cuyas skills quedan calificadas como `plugin:skill`.
+**Origen:** verificado en vivo en el spike T-017 (`spikes/t017_skills_empaquetadas.py`), confirmado también contra la documentación oficial del SDK vía ctx7. Ver A-004 (resuelto), D-016 (corregido), D-019.
 
 <!--
 ### C-001 — Título breve
