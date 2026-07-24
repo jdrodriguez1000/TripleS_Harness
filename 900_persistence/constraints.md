@@ -8,6 +8,7 @@
 - [C-002 — El modo no interactivo del Agent SDK requiere permission_mode="bypassPermissions" y ToolSearch en allowed_tools](#c-002--el-modo-no-interactivo-del-agent-sdk-requiere-permission_modebypasspermissions-y-toolsearch-en-allowed_tools)
 - [C-003 — No se puede eliminar una variable de entorno heredada del subproceso del SDK, solo sobrescribirla](#c-003--no-se-puede-eliminar-una-variable-de-entorno-heredada-del-subproceso-del-sdk-solo-sobrescribirla)
 - [C-004 — Las skills son un filtro de contexto, no un sandbox de seguridad](#c-004--las-skills-son-un-filtro-de-contexto-no-un-sandbox-de-seguridad)
+- [C-005 — La conversación multi-turno vive solo en memoria del proceso, sin persistencia entre ejecuciones](#c-005--la-conversación-multi-turno-vive-solo-en-memoria-del-proceso-sin-persistencia-entre-ejecuciones)
 
 ## Detalle
 
@@ -30,6 +31,11 @@
 **Tipo:** técnica / seguridad
 **Descripción:** el parámetro `skills` de `ClaudeAgentOptions` filtra qué skills quedan visibles para el modelo (nombres o `"all"`), pero una skill no listada sigue presente en disco y es alcanzable con `Read`/`Bash` si el agente tiene esas herramientas. No es un mecanismo de aislamiento; no se deben guardar secretos dentro de una skill asumiendo que "ocultarla" del listado la protege.
 **Origen:** confirmado contra documentación oficial del SDK (`/anthropics/claude-agent-sdk-python`, vía ctx7) durante esta sesión. Ver D-016 (estructura de `skills/`) y A-004 (riesgo de descubrimiento de skills empaquetadas).
+
+### C-005 — La conversación multi-turno vive solo en memoria del proceso, sin persistencia entre ejecuciones
+**Tipo:** técnica
+**Descripción:** `ClaudeSDKSession` conserva contexto entre turnos mientras el mismo objeto `Session`/`ClaudeSDKClient` sigue vivo dentro del proceso (verificado en T-016), pero no existe hoy ningún mecanismo que guarde el historial de mensajes en disco ni un `session_id` que permita al SDK reanudar la misma conversación en una ejecución posterior del harness. Al cerrar el proceso, la conversación se pierde por completo.
+**Origen:** observado durante la verificación en vivo de T-016 (spike de sesión persistente). Da origen a T-020 (persistir/reanudar conversaciones entre ejecuciones, pendiente).
 
 <!--
 ### C-001 — Título breve

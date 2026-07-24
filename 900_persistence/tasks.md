@@ -26,11 +26,12 @@
 | T-012 | Crear pyproject.toml del paquete sda (dependencias claude-agent-sdk, anyio; console script sda = sda.cli:main) | Implementada |
 | T-013 | Crear src/sda/cli.py con main() y sda --help funcional, más __main__.py | Implementada |
 | T-014 | Crear src/sda/core/provider.py (Provider ABC) y src/sda/core/session.py (Session ABC) | Implementada |
-| T-015 | Crear src/sda/providers/claude_sdk.py (ClaudeSDKProvider) con la política de autenticación por suscripción | No implementada |
-| T-016 | Spike: abrir sesión persistente sobre suscripción, confirmar respuesta y conservación de contexto entre turnos | No implementada |
+| T-015 | Crear src/sda/providers/claude_sdk.py (ClaudeSDKProvider) con la política de autenticación por suscripción | Implementada |
+| T-016 | Spike: abrir sesión persistente sobre suscripción, confirmar respuesta y conservación de contexto entre turnos | Implementada |
 | T-017 | Spike: verificar descubrimiento de skills empaquetadas dentro de sda cuando el cwd es el proyecto destino | No implementada |
 | T-018 | Ampliar session-start-protocol para que lea documentos de contexto en la raíz del proyecto (p. ej. idea.md) | No implementada |
 | T-019 | Configurar .gitignore, protocolo obligatorio de commit/push en session-closer, e inicializar repo git conectado a GitHub | Implementada |
+| T-020 | Persistir y reanudar conversaciones del harness entre ejecuciones (más allá de la memoria del proceso vivo) | No implementada |
 
 ## Detalle de tareas
 
@@ -133,18 +134,18 @@ Creados `src/sda/cli.py` (parser con `argparse`: `build_parser()`, `main()`, `--
 Creados `src/sda/core/__init__.py`, `src/sda/core/session.py` (`TurnResult` dataclass con campo `text`; `Session` ABC con `async send() -> TurnResult`, `async close()` y protocolo `async with` concreto vía `__aenter__`/`__aexit__`) y `src/sda/core/provider.py` (`Provider` ABC con `create_session(*, system_prompt=None) -> Session`). API asíncrona (el SDK `ClaudeSDKClient` es totalmente async; se verificó su interfaz en vivo). Verificado: imports OK, ambas ABCs lanzan `TypeError` al instanciarse directamente, una subclase de juguete ejecuta `send`→`TurnResult` y `async with` invoca `close`, y `core/` no importa `claude_agent_sdk` ni `sda.providers` (D-010, confirmado por grep: solo menciones en docstrings). Decisión de diseño registrada en D-018. Ver D-009, D-010, D-016.
 
 ### T-015 — Crear providers/claude_sdk.py
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-23
-**Fecha actualización:** 2026-07-23
+**Fecha actualización:** 2026-07-24
 
-`src/sda/providers/claude_sdk.py` — `ClaudeSDKProvider` con la política de autenticación por suscripción verificada (ver A-001, L-004, C-002, C-003). Ver D-008, D-010.
+Creados `src/sda/providers/__init__.py` y `src/sda/providers/claude_sdk.py` con `ClaudeSDKProvider` (subclase concreta de `Provider`) y `ClaudeSDKSession` (subclase concreta de `Session`) sobre `claude_agent_sdk`. Aplica la política de autenticación por suscripción verificada (helper `_subscription_env()`: hace `pop` de `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN` en el proceso padre y las sobrescribe a `""` en `ClaudeAgentOptions.env`, ver A-001, L-004, C-002, C-003), `permission_mode="bypassPermissions"` y `allowed_tools=["ToolSearch"]` (C-002). `send()` implementado sobre `client.query()` + `client.receive_response()`; `close()` sobre `client.disconnect()` (D-018). Conexión perezosa: se conecta en el primer `send()` y se mantiene abierta entre turnos. Verificado en vivo: subclassing correcto de `Provider`/`Session`, grep confirmando que `core/` no importa `claude_agent_sdk` (D-010 respetado), smoke test de 1 turno contra la suscripción real, y verificación manual adicional desde un proyecto externo (`sda_test_002`, fuera de este repo) instalando el paquete en modo editable y ejecutando una conversación multi-turno. Ver D-008, D-010.
 
 ### T-016 — Spike: sesión persistente sobre suscripción con contexto entre turnos
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-23
-**Fecha actualización:** 2026-07-23
+**Fecha actualización:** 2026-07-24
 
-Spike en `spikes/` que abra una sesión persistente sobre suscripción, confirme que responde y que conserva contexto entre turnos. Ver D-011.
+Spike creado en `spikes/t016_sesion_persistente.py`: confirma que una misma `Session` (sin reconectar entre turnos) conserva el contexto de un turno a otro. Ejecutado en vivo dentro del repo con resultado exitoso: T1 "ok", T2 "Verde" (recordó que el color favorito mencionado en T1 era verde), assert de conservación de contexto pasó correctamente. Ver D-011.
 
 ### T-017 — Spike: verificación del descubrimiento de skills empaquetadas
 **Estado:** No implementada
@@ -166,3 +167,10 @@ Tarea pendiente derivada de L-002: el `session-start-protocol` solo lee `900_per
 **Fecha actualización:** 2026-07-24
 
 Se creó `.gitignore` en la raíz. Se actualizó la skill `.claude/skills/session-end-protocol/SKILL.md` con una sección obligatoria de "Commit y push obligatorios" al cierre de cada sesión, apuntando al remoto `https://github.com/jdrodriguez1000/TripleS_Harness.git` (`origin`). Se actualizó `.claude/agents/session-closer.md` dándole acceso a la herramienta Bash y añadiendo la confirmación de commit/push en su resumen final, con prohibición explícita de `git push --force` u operaciones destructivas. Se inicializó el repo git local (`git init`), se conectó `origin` (repo ya existía vacío en GitHub) y se hizo el primer commit y push a `master` (15 archivos).
+
+### T-020 — Persistir y reanudar conversaciones del harness entre ejecuciones
+**Estado:** No implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+Durante T-016 se confirmó que la conversación multi-turno (contexto conservado entre turnos) funciona mientras el proceso Python está vivo, usando el mismo objeto `Session` sin reconectar. Pero esa conversación se pierde por completo al cerrar el proceso: hoy no existe ningún mecanismo que guarde el historial de mensajes en disco, ni un identificador de sesión/conversación que permita al SDK reconectar a la misma charla en una ejecución posterior. Todo vive en memoria del `ClaudeSDKClient` mientras el proceso corre. Falta investigar si el SDK subyacente soporta reanudar una conversación por `session_id` u otro mecanismo, y diseñar cómo se persistiría dicho estado (fuera del alcance de T-015/T-016). Nota: esto es distinto de la persistencia de `900_persistence/`, que es memoria del proyecto/harness en sí, no de las conversaciones que el harness genera con el modelo. Ver C-005.

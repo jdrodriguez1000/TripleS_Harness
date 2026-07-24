@@ -4,7 +4,7 @@
 > Actualizar la fecha y el estado general cada vez que se registre un avance.
 
 **Última actualización:** 2026-07-24
-**Estado general:** Arquitectura acordada y en construcción activa. El repo quedó conectado a GitHub (`origin`) con protocolo de commit/push obligatorio en cada cierre de sesión. Del primer incremento del paquete `sda` ya están implementadas la base de empaquetado (T-012), el CLI (T-013) y las ABCs del núcleo `Provider`/`Session` (T-014). Próximo paso: T-015, la primera implementación concreta (`ClaudeSDKProvider`) conectando con el SDK real bajo la política de autenticación por suscripción ya verificada.
+**Estado general:** Arquitectura acordada y en construcción activa. El repo quedó conectado a GitHub (`origin`) con protocolo de commit/push obligatorio en cada cierre de sesión. El primer incremento del paquete `sda` ya tiene su primer proveedor concreto funcional: base de empaquetado (T-012), CLI (T-013), ABCs del núcleo `Provider`/`Session` (T-014) y `ClaudeSDKProvider`/`ClaudeSDKSession` (T-015) verificados en vivo contra la suscripción real, incluyendo conversación multi-turno con contexto conservado (T-016). Se descubrió una limitación relevante: esa conversación solo vive en memoria mientras el proceso está vivo, sin persistencia entre ejecuciones (ver C-005, nueva tarea T-020 pendiente). Próximo paso abierto: T-017 (spike de descubrimiento de skills empaquetadas) y evaluar el diseño de T-020.
 
 ## Índice
 
@@ -24,6 +24,8 @@ El usuario explicó que el desorden del repo anterior vino de mantener dos camin
 
 En la sesión del 2026-07-24 se configuró el respaldo del proyecto en GitHub: `.gitignore`, sección obligatoria de commit/push en `session-end-protocol` y en el agente `session-closer` (con Bash habilitado y prohibición explícita de operaciones destructivas), `git init` local, conexión de `origin` (`https://github.com/jdrodriguez1000/TripleS_Harness.git`) y primer commit/push exitoso (T-019). Sobre esa base se construyeron tres piezas del primer incremento del paquete `sda`: T-012 (pyproject.toml, ya verificado en sesión previa), T-013 (`cli.py`/`__main__.py` con `argparse`, verificado en vivo por el propio usuario en una carpeta externa vía el comando `sda` instalado globalmente, ver D-017) y T-014 (`core/session.py` y `core/provider.py`, ABCs asíncronas `Session`/`Provider` con `TurnResult` como retorno de turno, ver D-018), verificadas ambas por instanciación fallida esperada de las ABCs, una subclase de juguete y grep confirmando el aislamiento del SDK (D-010).
 
+En una continuación de esa misma sesión (2026-07-24) se implementó T-015: `src/sda/providers/claude_sdk.py` con `ClaudeSDKProvider`/`ClaudeSDKSession`, primera implementación concreta sobre `claude_agent_sdk` aplicando la política de autenticación por suscripción ya verificada (A-001, L-004, C-002, C-003), con conexión perezosa que se abre en el primer `send()` y se mantiene entre turnos. Verificado en vivo (subclassing correcto, aislamiento del SDK respetado por `core/`, smoke test contra la suscripción real, y verificación manual adicional desde un proyecto externo instalando el paquete en modo editable). Después se implementó el spike T-016 (`spikes/t016_sesion_persistente.py`), confirmando en vivo que una misma `Session` conserva contexto entre turnos (recordó un dato mencionado en el turno anterior). De esa verificación surgió un hallazgo importante: esa conversación solo vive en memoria del proceso mientras está vivo, sin ningún mecanismo de persistencia en disco ni forma de reanudarla en una ejecución posterior — se registró como restricción nueva (C-005) y como tarea pendiente T-020 para investigar y diseñar a futuro.
+
 ## Hecho
 
 - 2026-07-23 | Carpeta `900_persistence/` creada con los 6 archivos base y estructura de índice (progress, tasks, lessons, decisions, assumptions, constraints) | ref: T-001, T-002
@@ -40,16 +42,18 @@ En la sesión del 2026-07-24 se configuró el respaldo del proyecto en GitHub: `
 - 2026-07-24 | Configurado .gitignore, protocolo obligatorio de commit/push en session-end-protocol y session-closer, repo git inicializado y conectado a GitHub (origin), primer commit/push exitoso | ref: T-019
 - 2026-07-24 | Creado src/sda/cli.py y __main__.py (argparse, --version, subcomando placeholder start), verificado en vivo por el usuario | ref: T-013, D-017
 - 2026-07-24 | Creadas las ABCs del núcleo core/session.py (Session, TurnResult) y core/provider.py (Provider), API asíncrona, aislamiento del SDK confirmado por grep | ref: T-014, D-018
+- 2026-07-24 | Creado src/sda/providers/claude_sdk.py (ClaudeSDKProvider, ClaudeSDKSession) sobre claude_agent_sdk con política de autenticación por suscripción, verificado en vivo (smoke test y verificación externa) | ref: T-015
+- 2026-07-24 | Spike sesión persistente (spikes/t016_sesion_persistente.py) verificado en vivo: contexto conservado entre turnos dentro del mismo proceso | ref: T-016
+- 2026-07-24 | Detectada y registrada la limitación de que la conversación no persiste entre ejecuciones del proceso (sin session_id ni historial en disco) | ref: C-005, T-020
 
 ## En progreso
 
-- Construcción del primer incremento del paquete `sda`: quedan pendientes T-015 (ClaudeSDKProvider) y los dos spikes de verificación (T-016, T-017)
+- Ninguna tarea en construcción activa en este momento; queda por definir el próximo foco (T-017, T-020 u otra)
 
 ## Próximo
 
-- Crear `providers/claude_sdk.py` (ClaudeSDKProvider) con la política de autenticación por suscripción | ref: T-015
-- Spike: sesión persistente sobre suscripción con contexto entre turnos | ref: T-016
 - Spike: verificación del descubrimiento de skills empaquetadas dentro de sda | ref: T-017
+- Investigar y diseñar la persistencia/reanudación de conversaciones del harness entre ejecuciones | ref: T-020
 - Definir si el soporte multi-vendor (Codex u otros) es restricción de v1 o meta futura (implícitamente resuelto como "futuro", falta confirmar) | ref: T-010
 - Definir la rúbrica del evaluador de calidad y el origen del umbral 4.0 mencionado en `idea.md` | ref: T-011
 - Ampliar el session-start-protocol para leer documentos de contexto en la raíz del proyecto | ref: T-018
