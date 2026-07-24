@@ -23,6 +23,10 @@
 - [D-017 — CLI con argparse (stdlib) y subcomando placeholder desde el esqueleto](#d-017--cli-con-argparse-stdlib-y-subcomando-placeholder-desde-el-esqueleto)
 - [D-018 — API asíncrona para Session/Provider y TurnResult como retorno del turno](#d-018--api-asíncrona-para-sessionprovider-y-turnresult-como-retorno-del-turno)
 - [D-019 — Las skills propias de sda se entregan mediante un plugin local único (corrige D-016)](#d-019--las-skills-propias-de-sda-se-entregan-mediante-un-plugin-local-único-corrige-d-016)
+- [D-020 — Pivote de infraestructura a la primera rebanada vertical del doble bucle, evaluación 4.0 diferida como stub](#d-020--pivote-de-infraestructura-a-la-primera-rebanada-vertical-del-doble-bucle-evaluación-40-diferida-como-stub)
+- [D-021 — Comunicación bucle externo↔interno vía Forma A: dos Session Python separadas conducidas por el orquestador](#d-021--comunicación-bucle-externointerno-vía-forma-a-dos-session-python-separadas-conducidas-por-el-orquestador)
+- [D-022 — Señal explícita del humano ("listo"/"continuar") para pasar de bootstrap a onboarding](#d-022--señal-explícita-del-humano-listocontinuar-para-pasar-de-bootstrap-a-onboarding)
+- [D-023 — Áreas de descubrimiento §1–§10 adoptadas de una plantilla existente del usuario, regla "se cita, no se interpreta"](#d-023--áreas-de-descubrimiento-1–10-adoptadas-de-una-plantilla-existente-del-usuario-regla-se-cita-no-se-interpreta)
 
 ## Detalle
 
@@ -192,6 +196,34 @@ TripleS_Harness/
 **Razón:** el spike T-017 demostró en vivo que el layout "pelado" `src/sda/skills/<nombre>/SKILL.md` (D-016 original) no se descubre desde un `cwd` externo, porque `skills` en `ClaudeAgentOptions` auto-configura `setting_sources=["user","project"]`, que solo miran `~/.claude/skills/` y `<cwd>/.claude/skills/`, no un directorio interno de un paquete instalado. El mecanismo nativo que sí funciona independientemente del `cwd` es el plugin local.
 **Alternativas consideradas:** copiar/enlazar las skills al `.claude/skills/` del proyecto destino en tiempo de arranque (descartada: requeriría escritura en el proyecto destino y sincronización manual); registrar `setting_sources` adicionales apuntando al paquete instalado (descartada: no es una opción soportada por el SDK para rutas arbitrarias fuera de user/project); un plugin por skill en vez de un plugin único contenedor (descartada: más complejidad de manifiestos sin beneficio claro para el alcance actual).
 **Impacto:** ref T-017 (spike que lo confirmó), D-016 (corregido), A-004 (resuelto), T-021 (tarea de promoción a producción pendiente).
+
+### D-020 — Pivote de infraestructura a la primera rebanada vertical del doble bucle, evaluación 4.0 diferida como stub
+**Fecha:** 2026-07-24
+**Decisión:** se pausan las tareas de infraestructura de desarrollo pendientes (T-018, T-020, T-021, T-023) y se construye, con aprobación explícita del usuario vía plan mode, la primera rebanada vertical del producto core descrito en `idea.md`: bootstrapping + bucle interno del onboarding-reader + puerta de aprobación humana (ver T-024). La evaluación de calidad interna (umbral 4.0) queda diferida como stub que siempre aprueba (`evaluator.py::evaluate_draft()`), dejando el seam listo para conectar la rúbrica real más adelante (T-011).
+**Razón:** se diagnosticó que ninguno de los pilares centrales de `idea.md` (doble bucle REPL, máquina de estados en disco, onboarding con puerta de aprobación humana, evaluación de calidad) existía todavía en el código; las tareas pendientes previas eran plomería alrededor de un producto que aún no tenía su primera rebanada vertical funcionando.
+**Alternativas consideradas:** seguir completando la infraestructura pendiente (T-018/T-020/T-021/T-023) antes de tocar el producto core; descartada porque no verificaba el diseño central del harness.
+**Impacto:** ref T-024. T-018, T-020, T-021, T-023 quedan pendientes pero de menor prioridad frente al producto core.
+
+### D-021 — Comunicación bucle externo↔interno vía Forma A: dos Session Python separadas conducidas por el orquestador
+**Fecha:** 2026-07-24
+**Decisión:** el orquestador (`Orchestrator`) conduce en código Python dos `Session` separadas (una para sí mismo, otra para el subagente onboarding-reader), en vez de delegar el subagente a un mecanismo nativo del SDK tipo `AgentDefinition`/Task.
+**Razón:** `idea.md` exige poder observar y evaluar el bucle interno turno a turno; conducir explícitamente ambas sesiones desde el propio código del harness permite interceptar cada turno del subagente (para la futura evaluación de calidad) de una forma que un subagente nativo delegado no expondría con el mismo nivel de control.
+**Alternativas consideradas:** usar subagentes nativos del SDK (`AgentDefinition`, observabilidad vía `parent_tool_use_id`, ya verificado como posible en T-009); descartada para este componente porque oculta el detalle turno a turno que el harness necesita evaluar.
+**Impacto:** ref T-024 (`orchestrator.py::_conducir_onboarding`).
+
+### D-022 — Señal explícita del humano ("listo"/"continuar") para pasar de bootstrap a onboarding
+**Fecha:** 2026-07-24
+**Decisión:** el paso de la fase de bootstrap (edición manual de `_context/scope.md`) a la fase de onboarding lo dispara una señal explícita que escribe el humano en la terminal (`listo`/`continuar`), no una heurística del sistema que intente adivinar cuándo terminó de editar el archivo.
+**Razón:** una heurística de "archivo cambiado" o "archivo no vacío" es frágil y puede disparar el onboarding a mitad de una edición; una señal explícita del humano es simple, predecible y coherente con la puerta de aprobación humana que ya exige `idea.md` en otros puntos del flujo.
+**Alternativas consideradas:** detectar automáticamente cambios en `scope.md` (con watcher de archivo o comparación de hash); descartada por complejidad y por introducir falsos disparos.
+**Impacto:** ref T-024 (`orchestrator.py::run`).
+
+### D-023 — Áreas de descubrimiento §1–§10 adoptadas de una plantilla existente del usuario, regla "se cita, no se interpreta"
+**Fecha:** 2026-07-24
+**Decisión:** la plantilla `templates/document-extract-temp.md` adopta las 10 áreas de descubrimiento de una plantilla que el usuario ya usaba en otro proyecto (Objetivo, Hipótesis de valor, Tipo de prototipo [n/a, lo deduce el sistema], Stakeholders, Actores, Camino feliz, Gatekeeper, Timebox, Exclusiones, Split por audiencia). El onboarding-reader debe citar textualmente (con ubicación) el contenido de `scope.md` que cubre cada área, marcar cobertura como cubierta/parcial/ausente/n-a, y listar aparte las ambigüedades sin resolverlas — regla de oro "se cita, no se interpreta".
+**Razón:** `document-extract.md` es insumo del futuro agente entrevistador, cuya función es no repreguntar lo que el scope ya cubre; resolver ambigüedades en esta etapa (en vez de listarlas) le quitaría al entrevistador la información que necesita para decidir qué preguntar. Además el proyecto está en fase de prototipado (meta: prototipo rápido y barato), lo que refuerza reutilizar una plantilla ya probada en vez de diseñar una nueva desde cero.
+**Alternativas consideradas:** que el onboarding-reader interprete/resuelva las ambigüedades del scope; descartada porque usurparía el rol del futuro entrevistador. Diseñar una plantilla nueva de áreas desde cero; descartada por no aportar valor frente a una ya validada por el usuario.
+**Impacto:** ref T-024 (`templates/document-extract-temp.md`, `prompts/onboarding_reader.md`).
 
 <!--
 ### D-XXX — Título breve

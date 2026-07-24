@@ -88,16 +88,30 @@ class ClaudeSDKProvider(Provider):
     def __init__(self, *, model: str | None = None) -> None:
         self._model = model
 
-    def create_session(self, *, system_prompt: str | None = None) -> Session:
-        """Crea (aún sin conectar) una ``ClaudeSDKSession`` lista para usarse."""
+    def create_session(
+        self,
+        *,
+        system_prompt: str | None = None,
+        cwd: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> Session:
+        """Crea (aún sin conectar) una ``ClaudeSDKSession`` lista para usarse.
+
+        ``cwd`` fija la carpeta que el agente explora (clave para el bucle interno,
+        que debe leer el proyecto destino). ``allowed_tools`` permite darle a una
+        sesión su propio conjunto de herramientas: por defecto solo ``ToolSearch``
+        (obligatorio en modo no interactivo para la carga diferida de esquemas,
+        C-002), pero el onboarding-reader necesita además Read/Glob/Grep/Write.
+        """
         opciones: dict[str, object] = {
             "system_prompt": system_prompt,
-            # Modo no interactivo: sin humano que responda diálogos de permiso, y
-            # ToolSearch es obligatorio para la carga diferida de esquemas (C-002).
+            # Modo no interactivo: sin humano que responda diálogos de permiso.
             "permission_mode": "bypassPermissions",
-            "allowed_tools": ["ToolSearch"],
+            "allowed_tools": allowed_tools if allowed_tools is not None else ["ToolSearch"],
             "env": _subscription_env(),
         }
+        if cwd is not None:
+            opciones["cwd"] = cwd
         if self._model is not None:
             opciones["model"] = self._model
 

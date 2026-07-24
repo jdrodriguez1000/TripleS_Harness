@@ -11,6 +11,7 @@
 - [L-005 — Las herramientas built-in del CLI están implementadas dentro del CLI, no se reimplementan](#l-005--las-herramientas-built-in-del-cli-están-implementadas-dentro-del-cli-no-se-reimplementan)
 - [L-006 — Las skills son carpetas con SKILL.md, no archivos .py](#l-006--las-skills-son-carpetas-con-skillmd-no-archivos-py)
 - [L-007 — La consola de Windows (cp1252) rompe al imprimir emojis del modelo](#l-007--la-consola-de-windows-cp1252-rompe-al-imprimir-emojis-del-modelo)
+- [L-008 — Completar tareas de infraestructura no equivale a construir el producto core del harness](#l-008--completar-tareas-de-infraestructura-no-equivale-a-construir-el-producto-core-del-harness)
 
 ## Detalle
 
@@ -55,6 +56,12 @@
 **Contexto:** al implementar el REPL interactivo real (`src/sda/repl.py`, ref T-022) e imprimir la respuesta del modelo directamente en la consola de Windows.
 **Lección:** la consola de Windows suele usar cp1252 por defecto, que no puede codificar emojis ni ciertos caracteres tipográficos; como el modelo los usa con frecuencia en sus respuestas, imprimir sin más lanza `UnicodeEncodeError` y corta el turno.
 **Aplicación:** reconfigurar `stdout`/`stdin` a UTF-8 con `errors="replace"` al inicio del REPL (helper `_forzar_utf8()` en `src/sda/repl.py`); es una precaución barata y segura de aplicar también en otros puntos de entrada interactivos del harness, sea cual sea la plataforma.
+
+### L-008 — Completar tareas de infraestructura no equivale a construir el producto core del harness
+**Fecha:** 2026-07-24
+**Contexto:** al iniciar esta sesión, la lista de "próximo" en `progress.md` solo tenía tareas de infraestructura de desarrollo (T-018, T-020, T-021, T-023). Al releer `idea.md` con foco en el producto, se detectó que ninguno de los pilares centrales descritos ahí (doble bucle REPL, máquina de estados en disco, flujo de onboarding con `document-extract.md`, evaluación de calidad interna, puerta de aprobación humana) existía todavía en el código.
+**Lección:** una lista de tareas pendientes puede ir acumulando trabajo de plomería/andamiaje sin que nadie note que el producto central definido en el documento de alcance sigue sin una sola rebanada vertical funcionando; conviene revisar periódicamente contra el documento de alcance original, no solo contra la lista de tareas acumulada.
+**Aplicación:** al priorizar próximas tareas, verificar explícitamente contra `idea.md` (o el documento de alcance vigente) si ya existe al menos una rebanada vertical end-to-end del producto core antes de seguir sumando tareas de infraestructura alrededor de él. Ver D-020, T-024.
 
 <!--
 ### L-XXX — Título breve

@@ -2,7 +2,7 @@
 name: session-starter
 description: Se activa cuando el usuario quiere iniciar, reanudar o continuar el trabajo en la sesión (frases como "iniciemos la sesión", "continuemos la sesión", "iniciemos", "trabajemos" o similares). Ejecuta el protocolo de inicio de sesión y muestra en pantalla el avance del proyecto, las últimas tareas realizadas y las próximas tareas priorizadas.
 model: haiku
-color: red
+color: blue
 tools: Read, Glob, Grep
 ---
 

@@ -21,10 +21,22 @@ class Provider(ABC):
     """
 
     @abstractmethod
-    def create_session(self, *, system_prompt: str | None = None) -> Session:
+    def create_session(
+        self,
+        *,
+        system_prompt: str | None = None,
+        cwd: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> Session:
         """Crea (aún sin conectar) una ``Session`` lista para usarse.
 
-        ``system_prompt`` es un parámetro opcional y agnóstico del proveedor; las
-        subclases lo traducen a lo que su SDK requiera.
+        Todos los parámetros son opcionales y agnósticos del proveedor; las
+        subclases los traducen a lo que su SDK requiera:
+
+        - ``system_prompt``: rol/instrucciones de la sesión.
+        - ``cwd``: carpeta de trabajo del agente (p. ej. el proyecto que debe
+          explorar el bucle interno). Si es ``None``, hereda el del proceso.
+        - ``allowed_tools``: herramientas que la sesión puede usar. Si es ``None``,
+          la subclase aplica su política por defecto.
         """
         raise NotImplementedError

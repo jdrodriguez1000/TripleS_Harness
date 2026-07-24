@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 from importlib.metadata import version
+from pathlib import Path
 
 import anyio
 
+from sda.orchestrator import run_orchestrator
 from sda.providers.claude_sdk import ClaudeSDKProvider
-from sda.repl import run_repl
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,16 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser(
         "start",
-        help="Abre una sesión interactiva en la carpeta actual.",
+        help="Arranca el harness (doble bucle) en la carpeta actual.",
     )
 
     return parser
 
 
 def _cmd_start(_args: argparse.Namespace) -> int:
-    """Arranca una sesión interactiva (REPL) sobre el proveedor de suscripción."""
+    """Arranca el orquestador del doble bucle sobre el proyecto de la carpeta actual."""
     provider = ClaudeSDKProvider()
-    return anyio.run(run_repl, provider)
+    return anyio.run(run_orchestrator, provider, Path.cwd())
 
 
 def main(argv: list[str] | None = None) -> int:

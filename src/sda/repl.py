@@ -20,6 +20,21 @@ from sda.core.provider import Provider
 _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
 
 
+async def prompt_line(prompt: str) -> str:
+    """Lee una línea del teclado sin bloquear el event loop.
+
+    ``input()`` es bloqueante: se corre en un hilo para no congelar el bucle
+    asíncrono de la(s) sesión(es). Utilidad compartida por el REPL simple y por el
+    orquestador del doble bucle.
+    """
+    return await anyio.to_thread.run_sync(input, prompt)
+
+
+def forzar_utf8() -> None:
+    """Reconfigura la consola a UTF-8 (ver ``_forzar_utf8``). Alias público."""
+    _forzar_utf8()
+
+
 def _forzar_utf8() -> None:
     """Reconfigura la consola a UTF-8 para no romper con acentos ni emojis.
 
@@ -45,9 +60,7 @@ async def run_repl(provider: Provider) -> int:
     async with provider.create_session() as session:
         while True:
             try:
-                # input() es bloqueante: se corre en un hilo para no bloquear el
-                # event loop asíncrono de la sesión.
-                linea = await anyio.to_thread.run_sync(input, "tú> ")
+                linea = await prompt_line("tú> ")
             except (EOFError, KeyboardInterrupt):
                 # Ctrl+Z/Ctrl+D o Ctrl+C: salir limpiamente con un salto de línea.
                 print()

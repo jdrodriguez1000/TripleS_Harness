@@ -16,3 +16,6 @@ sda = "sda.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sda = ["prompts/*.md", "templates/*.md"]
