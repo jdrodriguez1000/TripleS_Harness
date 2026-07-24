@@ -10,6 +10,11 @@ from __future__ import annotations
 import argparse
 from importlib.metadata import version
 
+import anyio
+
+from sda.providers.claude_sdk import ClaudeSDKProvider
+from sda.repl import run_repl
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construye y devuelve el parser de argumentos del CLI ``sda``."""
@@ -29,16 +34,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser(
         "start",
-        help="Arranca el harness en la carpeta actual (aún no implementado).",
+        help="Abre una sesión interactiva en la carpeta actual.",
     )
 
     return parser
 
 
 def _cmd_start(_args: argparse.Namespace) -> int:
-    """Placeholder del subcomando ``start``; la lógica real llega en T-014+."""
-    print("[sda] 'start' aún no implementado (T-014+)")
-    return 0
+    """Arranca una sesión interactiva (REPL) sobre el proveedor de suscripción."""
+    provider = ClaudeSDKProvider()
+    return anyio.run(run_repl, provider)
 
 
 def main(argv: list[str] | None = None) -> int:

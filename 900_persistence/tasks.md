@@ -33,6 +33,8 @@
 | T-019 | Configurar .gitignore, protocolo obligatorio de commit/push en session-closer, e inicializar repo git conectado a GitHub | Implementada |
 | T-020 | Persistir y reanudar conversaciones del harness entre ejecuciones (más allá de la memoria del proceso vivo) | No implementada |
 | T-021 | Promover a producción el plugin local de skills de sda (src/sda/plugin/, resolución con importlib, ClaudeSDKProvider.create_session con plugins/skills) | No implementada |
+| T-022 | Implementar el REPL interactivo real del subcomando `sda start` (src/sda/repl.py) | Implementada |
+| T-023 | Capturar uso de tokens y costo por turno en TurnResult (ResultMessage del SDK) | No implementada |
 
 ## Detalle de tareas
 
@@ -182,3 +184,17 @@ Durante T-016 se confirmó que la conversación multi-turno (contexto conservado
 **Fecha actualización:** 2026-07-24
 
 Tarea derivada del hallazgo de T-017/D-019: crear el plugin real `src/sda/plugin/` (`.claude-plugin/plugin.json` + `skills/<nombre>/SKILL.md`) dentro del paquete `sda`, y la lógica que resuelve su ruta con `importlib` (en vez de una ruta de spike hardcodeada) para pasarla como `plugins=[{"type":"local","path":...}]` en las opciones del proveedor. Requiere ampliar `ClaudeSDKProvider.create_session` para aceptar/pasar `plugins` y `skills`. Fuera de alcance del spike (D-011): promoción a producción pendiente.
+
+### T-022 — Implementar el REPL interactivo real del subcomando `sda start`
+**Estado:** Implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+Creado `src/sda/repl.py` con la función async `run_repl(provider)`: abre `async with provider.create_session()`, lee el teclado sin bloquear el event loop (`anyio.to_thread.run_sync(input, "tú> ")`), envía cada turno con `session.send()` e imprime la respuesta (`resultado.text`); termina con `salir`/`exit`/`quit` o con EOF/Ctrl-C. Incluye el helper `_forzar_utf8()` que reconfigura `stdout`/`stdin` a UTF-8 con `errors="replace"` para evitar `UnicodeEncodeError` con emojis en consola Windows (ver L-007). Se modificó `src/sda/cli.py`: `_cmd_start` ahora arranca `anyio.run(run_repl, ClaudeSDKProvider())` en vez del placeholder anterior, y se corrigió el texto de ayuda del subcomando `start` a "Abre una sesión interactiva en la carpeta actual.". Verificado en vivo por el usuario desde una carpeta externa (`sda_test_003`) con el paquete instalado en modo editable: conversación multi-turno real sostenida por teclado, con memoria correcta de nombre, ciudad (corregida en vivo) y color a lo largo de varios turnos, y respuesta honesta ("no lo sé") ante un dato nunca proporcionado, sin alucinar. Sin cambios en `core/`, `providers/` ni `pyproject.toml`.
+
+### T-023 — Capturar uso de tokens y costo por turno en TurnResult
+**Estado:** No implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+El bucle de `ClaudeSDKSession.send()` (`src/sda/providers/claude_sdk.py`) hoy solo filtra `AssistantMessage`/`TextBlock` de `client.receive_response()` y descarta el `ResultMessage` que el SDK emite al final de cada turno. Ese `ResultMessage` trae `usage` (tokens de entrada/salida/caché), `total_cost_usd`, `model_usage`, `num_turns`, `stop_reason` y también `session_id`. Falta: (a) capturar el `ResultMessage` en el bucle de `send()`, y (b) ampliar el dataclass `TurnResult` (`src/sda/core/session.py`) para llevar esa metadata además de `text` — extensión que su docstring ya prevé explícitamente (ver D-018). Es la observabilidad que necesita el bucle interno/evaluador (relacionado con T-011 y el umbral "4.0" de `idea.md`). El `session_id` de ese mismo `ResultMessage` es además una pieza clave para T-020 (persistencia/reanudación de conversaciones entre ejecuciones).

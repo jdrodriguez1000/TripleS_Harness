@@ -4,7 +4,7 @@
 > Actualizar la fecha y el estado general cada vez que se registre un avance.
 
 **Última actualización:** 2026-07-24
-**Estado general:** Arquitectura acordada y en construcción activa. El repo quedó conectado a GitHub (`origin`) con protocolo de commit/push obligatorio en cada cierre de sesión. El primer incremento del paquete `sda` ya tiene su primer proveedor concreto funcional: base de empaquetado (T-012), CLI (T-013), ABCs del núcleo `Provider`/`Session` (T-014) y `ClaudeSDKProvider`/`ClaudeSDKSession` (T-015) verificados en vivo contra la suscripción real, incluyendo conversación multi-turno con contexto conservado (T-016). Se descubrió una limitación relevante: esa conversación solo vive en memoria mientras el proceso está vivo, sin persistencia entre ejecuciones (ver C-005, nueva tarea T-020 pendiente). El riesgo abierto sobre descubrimiento de skills empaquetadas (A-004) quedó VERIFICADO con el spike T-017: el layout "pelado" de D-016 no funciona desde un cwd externo; la solución verificada es un plugin local único (nueva decisión D-019), con la promoción a producción pendiente en T-021. Próximo paso abierto: T-018 (ampliar session-start-protocol), T-020 (persistencia de conversaciones) y T-021 (promover el plugin de skills a producción).
+**Estado general:** Arquitectura acordada y en construcción activa. El repo quedó conectado a GitHub (`origin`) con protocolo de commit/push obligatorio en cada cierre de sesión. El primer incremento del paquete `sda` ya tiene su primer proveedor concreto funcional: base de empaquetado (T-012), CLI (T-013), ABCs del núcleo `Provider`/`Session` (T-014) y `ClaudeSDKProvider`/`ClaudeSDKSession` (T-015) verificados en vivo contra la suscripción real, incluyendo conversación multi-turno con contexto conservado (T-016). El subcomando `sda start` dejó de ser un placeholder: ahora arranca un REPL interactivo real (T-022), verificado en vivo por el usuario desde una carpeta externa con conversación multi-turno por teclado, memoria correcta de datos entre turnos (incluida una corrección en vivo) y sin alucinar ante un dato nunca dado. Se descubrió una limitación relevante: esa conversación solo vive en memoria mientras el proceso está vivo, sin persistencia entre ejecuciones (ver C-005, tarea T-020 pendiente, siguiente foco de construcción). El riesgo abierto sobre descubrimiento de skills empaquetadas (A-004) quedó VERIFICADO con el spike T-017: el layout "pelado" de D-016 no funciona desde un cwd externo; la solución verificada es un plugin local único (nueva decisión D-019), con la promoción a producción pendiente en T-021. Próximo paso abierto: T-020 (persistencia de conversaciones, ya con T-023 como preparación de observabilidad/metadata), T-018 (ampliar session-start-protocol) y T-021 (promover el plugin de skills a producción).
 
 ## Índice
 
@@ -28,6 +28,8 @@ En una continuación de esa misma sesión (2026-07-24) se implementó T-015: `sr
 
 En una nueva sesión (2026-07-24) se ejecutó el spike T-017 (`spikes/t017_skills_empaquetadas.py` + fixtures en `spikes/t017_fixtures/`), corrido desde un `cwd` temporal externo simulando el proyecto destino. Resultado: una skill "pelada" estilo `src/sda/skills/<n>/SKILL.md` NO se descubre desde ese cwd externo (respuesta `NO-LA-SE`), mientras que la misma skill empaquetada en un plugin local (`plugins=[{"type":"local","path":...}]`) SÍ se descubre (respuesta `SKILL-T017-PLUGIN-OK`). Esto resuelve el riesgo A-004 (VERIFICADO: era real) y obliga a corregir D-016 (el layout de `skills/` suelto queda invalidado) mediante la nueva decisión D-019: las skills de `sda` se entregarán dentro de un plugin local único, con resolución de ruta por `importlib` pendiente para producción (nueva tarea T-021). Se registró también la restricción C-006 documentando el mecanismo. El material del spike se deja en el repo por ahora (conforme a D-011) para que el usuario pueda re-ejecutarlo.
 
+En una nueva sesión (2026-07-24) se implementó T-022: el REPL interactivo real del subcomando `sda start`, reemplazando el placeholder. Se creó `src/sda/repl.py` (función async `run_repl(provider)`: abre `async with provider.create_session()`, lee el teclado sin bloquear el event loop vía `anyio.to_thread.run_sync(input, ...)`, envía cada turno con `session.send()` e imprime la respuesta; sale con `salir`/`exit`/`quit` o EOF/Ctrl-C; incluye `_forzar_utf8()` para reconfigurar stdout/stdin a UTF-8, ver L-007) y se modificó `src/sda/cli.py` para que `start` arranque `anyio.run(run_repl, ClaudeSDKProvider())`. El usuario verificó en vivo desde una carpeta externa (`sda_test_003`, paquete instalado en modo editable): el modelo recordó nombre, ciudad (corregida en vivo) y color a lo largo de turnos separados, y respondió honestamente "no lo sé" ante un dato nunca dado, sin alucinar. Se registró también la tarea T-023 (capturar `ResultMessage`/uso de tokens y costo en `TurnResult`), relacionada con T-011 y clave para T-020 por el `session_id` que trae ese mismo mensaje.
+
 ## Hecho
 
 - 2026-07-23 | Carpeta `900_persistence/` creada con los 6 archivos base y estructura de índice (progress, tasks, lessons, decisions, assumptions, constraints) | ref: T-001, T-002
@@ -48,14 +50,16 @@ En una nueva sesión (2026-07-24) se ejecutó el spike T-017 (`spikes/t017_skill
 - 2026-07-24 | Spike sesión persistente (spikes/t016_sesion_persistente.py) verificado en vivo: contexto conservado entre turnos dentro del mismo proceso | ref: T-016
 - 2026-07-24 | Detectada y registrada la limitación de que la conversación no persiste entre ejecuciones del proceso (sin session_id ni historial en disco) | ref: C-005, T-020
 - 2026-07-24 | Spike de descubrimiento de skills empaquetadas ejecutado en vivo: confirmado que el layout "pelado" no se descubre desde cwd externo y que un plugin local sí funciona | ref: T-017, A-004, D-019, C-006
+- 2026-07-24 | Implementado el REPL interactivo real de `sda start` (src/sda/repl.py), reemplazando el placeholder; verificado en vivo por el usuario con conversación multi-turno por teclado desde una carpeta externa | ref: T-022, L-007
 
 ## En progreso
 
-- Ninguna tarea en construcción activa en este momento; queda por definir el próximo foco (T-018, T-020, T-021 u otra)
+- Ninguna tarea en construcción activa en este momento; queda por definir el próximo foco (T-018, T-020, T-021, T-023 u otra)
 
 ## Próximo
 
 - Investigar y diseñar la persistencia/reanudación de conversaciones del harness entre ejecuciones | ref: T-020
+- Capturar uso de tokens y costo por turno en TurnResult (ResultMessage del SDK), base de observabilidad y de session_id para T-020 | ref: T-023
 - Promover a producción el plugin local de skills de sda (src/sda/plugin/, resolución con importlib, ampliar ClaudeSDKProvider.create_session) | ref: T-021
 - Definir si el soporte multi-vendor (Codex u otros) es restricción de v1 o meta futura (implícitamente resuelto como "futuro", falta confirmar) | ref: T-010
 - Definir la rúbrica del evaluador de calidad y el origen del umbral 4.0 mencionado en `idea.md` | ref: T-011

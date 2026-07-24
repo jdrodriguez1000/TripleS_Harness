@@ -10,6 +10,7 @@
 - [L-004 — Trampa del entorno heredado por el subproceso del Agent SDK](#l-004--trampa-del-entorno-heredado-por-el-subproceso-del-agent-sdk)
 - [L-005 — Las herramientas built-in del CLI están implementadas dentro del CLI, no se reimplementan](#l-005--las-herramientas-built-in-del-cli-están-implementadas-dentro-del-cli-no-se-reimplementan)
 - [L-006 — Las skills son carpetas con SKILL.md, no archivos .py](#l-006--las-skills-son-carpetas-con-skillmd-no-archivos-py)
+- [L-007 — La consola de Windows (cp1252) rompe al imprimir emojis del modelo](#l-007--la-consola-de-windows-cp1252-rompe-al-imprimir-emojis-del-modelo)
 
 ## Detalle
 
@@ -48,6 +49,12 @@
 **Contexto:** al verificar contra documentación oficial del SDK durante esta sesión.
 **Lección:** las skills del harness no son módulos Python; son carpetas que contienen un archivo `SKILL.md`, y el nombre de la skill sale del campo `name` dentro de ese `SKILL.md` o, en su defecto, del nombre de la carpeta. Además, `skills` en `ClaudeAgentOptions` es un filtro de contexto (qué skills ve el modelo), no un mecanismo de aislamiento de archivos (ver C-004).
 **Aplicación:** al construir `src/sda/skills/<nombre>/SKILL.md` (ref D-016), no se debe intentar implementar skills como paquetes `.py`; y no se debe asumir que ocultar una skill del listado la protege de acceso vía `Read`/`Bash`.
+
+### L-007 — La consola de Windows (cp1252) rompe al imprimir emojis del modelo
+**Fecha:** 2026-07-24
+**Contexto:** al implementar el REPL interactivo real (`src/sda/repl.py`, ref T-022) e imprimir la respuesta del modelo directamente en la consola de Windows.
+**Lección:** la consola de Windows suele usar cp1252 por defecto, que no puede codificar emojis ni ciertos caracteres tipográficos; como el modelo los usa con frecuencia en sus respuestas, imprimir sin más lanza `UnicodeEncodeError` y corta el turno.
+**Aplicación:** reconfigurar `stdout`/`stdin` a UTF-8 con `errors="replace"` al inicio del REPL (helper `_forzar_utf8()` en `src/sda/repl.py`); es una precaución barata y segura de aplicar también en otros puntos de entrada interactivos del harness, sea cual sea la plataforma.
 
 <!--
 ### L-XXX — Título breve
