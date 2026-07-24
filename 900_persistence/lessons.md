@@ -16,6 +16,7 @@
 - [L-010 — `effort` del SDK funciona por sí solo, sin requerir `thinking` adaptive, y no se reporta de vuelta](#l-010--effort-del-sdk-funciona-por-sí-solo-sin-requerir-thinking-adaptive-y-no-se-reporta-de-vuelta)
 - [L-011 — El CLI usa un modelo auxiliar (Haiku) para tareas internas de infraestructura, independiente del modelo fijado por agente](#l-011--el-cli-usa-un-modelo-auxiliar-haiku-para-tareas-internas-de-infraestructura-independiente-del-modelo-fijado-por-agente)
 - [L-012 — El SDK soporta herramientas en-proceso que conviven con autenticación por suscripción y con una Session anidada](#l-012--el-sdk-soporta-herramientas-en-proceso-que-conviven-con-autenticación-por-suscripción-y-con-una-session-anidada)
+- [L-013 — `allowed_tools` no restringe el toolset bajo `bypassPermissions`: solo auto-aprueba](#l-013--allowed_tools-no-restringe-el-toolset-bajo-bypasspermissions-solo-auto-aprueba)
 
 ## Detalle
 
@@ -90,6 +91,12 @@
 **Contexto:** al ejecutar el spike `spikes/t027_herramienta_en_proceso.py` (ref T-027), se necesitaba confirmar si un líder LLM (Opus + effort high) podía invocar una herramienta implementada en Python que, a su vez, condujera una segunda `Session` completa del SDK (bucle interno, Sonnet + effort high) sin romper la autenticación por suscripción ni chocar con el `ClaudeSDKClient` del propio líder.
 **Lección:** el SDK (`claude_agent_sdk` 0.2.126) soporta herramientas en-proceso vía `@tool(name, desc, schema)` + `create_sdk_mcp_server("harness", tools=[...])`, registradas en `ClaudeAgentOptions(mcp_servers={"harness": server}, allowed_tools=["mcp__harness__<tool>"])` (el modelo las ve con el nombre `mcp__<server>__<tool>`). Es seguro que el callback Python de esa herramienta abra y conduzca un `ClaudeSDKClient` anidado (una segunda `Session` independiente) mientras la autenticación por suscripción sigue vigente (bajo `permission_mode="bypassPermissions"`, modo no interactivo) y sin conflicto de event loop ni de sesión con el líder que la invocó.
 **Aplicación:** esta es la base técnica que habilita D-026/D-027 (el orchestrator-leader como agente que invoca el bucle interno vía herramienta en-proceso) y, en general, cualquier agente futuro del doble bucle que necesite invocar sub-flujos deterministas o anidados desde una herramienta propia, en vez de delegarlos a un subagente nativo del SDK.
+
+### L-013 — `allowed_tools` no restringe el toolset bajo `bypassPermissions`: solo auto-aprueba
+**Fecha:** 2026-07-24
+**Contexto:** al probar T-028 (orchestrator-leader) en una carpeta de proyecto real, el usuario notó que las citas de línea del líder parecían provenir de un acceso de lectura sin restricción, pese a que el diseño asumía (desde T-024/D-026) que `allowed_tools` limitaba qué herramientas nativas tenía cada agente.
+**Lección:** bajo `permission_mode="bypassPermissions"`, `allowed_tools` de `ClaudeAgentOptions` NO restringe el conjunto de herramientas disponibles; solo evita el prompt de confirmación de permiso para las herramientas listadas (las auto-aprueba). El agente conserva acceso al toolset nativo completo (Read, Write, Edit, Bash, etc.) esté o no en `allowed_tools`. Confirmado contra documentación oficial del SDK `claude-agent-sdk` y con una prueba en vivo: una sesión con `tools=["Glob"]` (no `allowed_tools`) sí quedó incapaz de leer archivos. El mecanismo real de restricción es `tools=` (allowlist de herramientas nativas base) o `disallowed_tools=` (denylist).
+**Aplicación:** para cualquier sandbox real por-agente en este proyecto, usar `builtin_tools` (nuevo parámetro de `Provider.create_session`, mapea a `tools=`) o `disallowed_tools`, nunca `allowed_tools` como mecanismo de seguridad. Revisar cualquier afirmación previa de "sandbox" basada solo en `allowed_tools` (p. ej. T-024) como nominal hasta que se confirme con `tools=`/`disallowed_tools=`. Ver D-031.
 
 <!--
 ### L-XXX — Título breve

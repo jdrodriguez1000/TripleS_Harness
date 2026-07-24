@@ -1,213 +1,87 @@
 """Orquestador del doble bucle REPL (el corazón del harness).
 
-Implementa, sobre una carpeta de proyecto, el flujo de ``idea.md`` para esta
-primera rebanada:
+Desde T-028, el bucle externo lo lidera un **agente LLM** (el `orchestrator-leader`,
+Opus + effort high, D-025/D-026), no un `if/elif` de fases en Python. Este módulo:
 
-    Fase 1  Bootstrapping  -> crea la estructura y espera que el humano llene el scope.
-    Fase 2  REPL interno   -> el onboarding-reader produce _prototype/document-extract.md.
-    Fase 3  Puerta humana  -> el humano aprueba o rechaza (con feedback).
-    Fase 4  Cierre         -> al aprobar, promueve el documento y sincroniza _persistence.
+1. Hace el arranque determinista (``bootstrap``) antes de que exista el LLM.
+2. Construye la sesión del líder con su system prompt y sus **herramientas
+   en-proceso** (``sda.tools.LeaderTools``).
+3. Expone el bucle de conversación humano↔líder por la terminal.
 
-Sigue la **Forma A**: es *nuestro código* quien conduce dos ``Session`` separadas
-—la externa (este bucle, cara al humano) y la interna (el onboarding-reader)— para
-poder observar y, más adelante, evaluar el bucle interno. El bucle de rechazo
-reutiliza la misma sesión interna viva, que conserva el contexto entre correcciones.
+El líder decide *cuándo* avanzar de fase, lanzar el bucle interno o promover el
+borrador; los **efectos peligrosos** (estado, lock, gate) son efectos laterales
+deterministas de sus herramientas (principio "el LLM decide / las herramientas hacen
+cumplir", D-026). La observabilidad turno-a-turno del bucle interno (D-021) se
+conserva dentro de ``run_inner_loop``, que conduce la ``Session`` interna con nuestro
+propio código (D-027).
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from sda import bootstrap, state
 from sda.core.provider import Provider
-from sda.core.session import Session
-from sda.evaluator import evaluate_draft
 from sda.repl import forzar_utf8, prompt_line
 from sda.resources import load_prompt
+from sda.tools import LeaderTools
 
 _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
-_COMANDOS_CONTINUAR = frozenset({"listo", "continuar"})
 
-# Herramientas que puede usar el onboarding-reader: solo lectura del proyecto y
-# escritura de su único entregable (sandbox deliberadamente acotado).
-_ONBOARDING_TOOLS = ["Read", "Glob", "Grep", "Write"]
-_ONBOARDING_PROMPT_FILE = "onboarding_reader.md"
+# Modelo y esfuerzo del líder, fijados explícitamente (D-025/D-026): es el único
+# componente Opus persistente y el más caro por turno, así que se declara aquí.
+_LEADER_MODEL = "opus"
+_LEADER_EFFORT = "high"
+_LEADER_PROMPT_FILE = "orchestrator_leader.md"
 
-# Modelo y esfuerzo de razonamiento fijados explícitamente para el onboarding-reader
-# (T-026), en vez de depender del default implícito del CLI/SDK. Decisión del usuario:
-# Sonnet basta para la extracción/instanciación de la plantilla, con esfuerzo alto.
-_ONBOARDING_MODEL = "sonnet"
-_ONBOARDING_EFFORT = "high"
-
-# Instrucción de arranque del bucle interno (primer turno de la sesión interna).
-_INSTRUCCION_INICIAL = (
-    "Ejecuta tu tarea ahora. Lee _context/scope.md, la plantilla "
-    "_templates/document-extract-temp.md y cualquier otro documento del "
-    "proyecto, y escribe _prototype/document-extract.md instanciando la "
-    "plantilla. Al terminar, responde con tu resumen ejecutivo."
-)
+# Sandbox DURO del líder: solo lectura. Puede fundamentar sus respuestas leyendo el
+# scope y el borrador, pero NO puede escribir `_harness_state.json` ni forzar
+# `APPROVED` con un Write genérico. Todo efecto sobre el harness pasa, obligatoriamente,
+# por sus herramientas en-proceso (principio "manos atadas", D-026). Cierra el hueco
+# detectado en la prueba en vivo de T-028: `allowed_tools` no restringía el toolset.
+_LEADER_TOOLS = ["Read", "Glob", "Grep"]
 
 
-def _scope_esta_lleno(project_dir: Path) -> bool:
-    """Indica si el humano ya escribió contenido real en ``_context/scope.md``.
+def _mensaje_apertura(st: state.HarnessState, recien_creado: bool) -> str:
+    """Primer turno que se le da al líder para que salude según el estado.
 
-    Heurística: se quitan los comentarios HTML y los encabezados markdown; si
-    queda texto no vacío, se considera lleno. Así distinguimos el stub (solo
-    comentarios y título) de un scope de verdad.
+    No lo ve el humano: es la instrucción interna que orienta al líder sobre en qué
+    punto del flujo arranca (proyecto nuevo, borrador esperando revisión, o ya
+    aprobado), para que su saludo sea coherente al reanudar.
     """
-    ruta = project_dir / bootstrap.SCOPE_FILE
-    if not ruta.is_file():
-        return False
-    texto = ruta.read_text(encoding="utf-8")
-    sin_comentarios = re.sub(r"<!--.*?-->", "", texto, flags=re.DOTALL)
-    lineas_utiles = [
-        ln.strip()
-        for ln in sin_comentarios.splitlines()
-        if ln.strip() and not ln.lstrip().startswith("#")
-    ]
-    return bool(lineas_utiles)
-
-
-def _set_frontmatter(project_dir: Path, campo: str, valor: str) -> None:
-    """Reemplaza ``campo: ...`` en el front-matter de ``document-extract.md``.
-
-    Solo toca la primera aparición (el front-matter) y preserva el resto del
-    archivo. Si el archivo o el campo no existen, no hace nada.
-    """
-    ruta = project_dir / bootstrap.EXTRACT_FILE
-    if not ruta.is_file():
-        return
-    texto = ruta.read_text(encoding="utf-8")
-    nuevo = re.sub(
-        rf"(?m)^({re.escape(campo)}:)[^\n]*",
-        rf"\1 {valor}",
-        texto,
-        count=1,
+    fase = st.current_phase
+    if recien_creado or fase in (state.PHASE_BOOTSTRAPPING, state.PHASE_ONBOARDING):
+        return (
+            "El humano acaba de iniciar el harness en un proyecto nuevo. Estás en el "
+            "arranque del flujo de onboarding. Salúdalo y pídele que edite "
+            "_context/scope.md con las ideas de su proyecto y te avise cuando termine."
+        )
+    if fase == state.PHASE_HUMAN_REVIEW:
+        return (
+            "Se reanuda la sesión. Ya hay un borrador en "
+            "_prototype/document-extract.md esperando la decisión del humano. "
+            "Salúdalo, recuérdale que lo revise en su editor y dile que te avise si "
+            "lo aprueba o qué quiere corregir. No llames a ninguna herramienta hasta "
+            "que el humano responda."
+        )
+    if fase == state.PHASE_READY_FOR_WORK:
+        return (
+            "Se reanuda la sesión. El onboarding ya fue aprobado y el proyecto está "
+            "listo para trabajar. Saluda al humano e infórmaselo brevemente."
+        )
+    return (
+        "Se reanuda la sesión del harness. Saluda al humano y ponte a su disposición "
+        f"para continuar (fase actual: {fase})."
     )
-    ruta.write_text(nuevo, encoding="utf-8")
-
-
-def _sincronizar_persistencia(project_dir: Path) -> None:
-    """Marca en ``_persistence/progress.md`` que el onboarding se completó.
-
-    Sincronización mínima de esta rebanada (Step 10 de ``idea.md``): deja
-    constancia del hito. La gestión rica de tasks/progress llega después.
-    """
-    progreso = project_dir / bootstrap.PERSISTENCE_DIR / "progress.md"
-    progreso.parent.mkdir(parents=True, exist_ok=True)
-    linea = "- Onboarding completado: _prototype/document-extract.md APROBADO por el humano.\n"
-    with progreso.open("a", encoding="utf-8") as fh:
-        fh.write(linea)
 
 
 class Orchestrator:
-    """Conduce el doble bucle sobre una carpeta de proyecto."""
+    """Conduce el doble bucle sobre una carpeta de proyecto, liderado por el agente."""
 
     def __init__(self, provider: Provider, project_dir: Path) -> None:
         self._provider = provider
         self._project_dir = project_dir
-        # Sesión interna (onboarding-reader). Se mantiene viva durante la revisión
-        # humana para poder re-conducirla con feedback si el humano rechaza.
-        self._inner: Session | None = None
-
-    # --- Bucle interno (onboarding-reader) -----------------------------------
-
-    async def _abrir_onboarding(self) -> None:
-        """Abre la sesión interna del onboarding-reader (si no está abierta)."""
-        if self._inner is not None:
-            return
-        self._inner = self._provider.create_session(
-            system_prompt=load_prompt(_ONBOARDING_PROMPT_FILE),
-            cwd=str(self._project_dir),
-            allowed_tools=_ONBOARDING_TOOLS,
-            model=_ONBOARDING_MODEL,
-            effort=_ONBOARDING_EFFORT,
-        )
-
-    async def _cerrar_onboarding(self) -> None:
-        """Cierra la sesión interna si sigue abierta."""
-        if self._inner is not None:
-            await self._inner.close()
-            self._inner = None
-
-    async def _conducir_onboarding(self, instruccion: str) -> str:
-        """Manda un turno al onboarding-reader y devuelve su resumen (texto)."""
-        assert self._inner is not None
-        st = state.load(self._project_dir)
-        st.active_repl = state.REPL_INTERNAL
-        st.active_subagent = "onboarding-reader"
-        st.transaction_lock = True
-        st.current_phase = state.PHASE_ONBOARDING
-        state.save(self._project_dir, st)
-
-        print(
-            f"\n[sda] Invocando al agente onboarding-reader "
-            f"(modelo={_ONBOARDING_MODEL}, effort={_ONBOARDING_EFFORT})…"
-        )
-        print(
-            f"[onboarding-reader] Trabajando en la construcción de "
-            f"{bootstrap.EXTRACT_FILE}. Te aviso cuando termine…\n"
-        )
-        resultado = await self._inner.send(instruccion)
-        print("[onboarding-reader] Trabajo terminado.")
-
-        # El entregable ya está en disco; se somete a la eval interna (stub por ahora).
-        evaluacion = evaluate_draft(self._project_dir / bootstrap.EXTRACT_FILE)
-        if not evaluacion.passed and evaluacion.feedback:
-            # Cuando la eval real exista, aquí se re-conduce al subagente sin
-            # molestar al humano. Con el stub actual esta rama no se toma.
-            return await self._conducir_onboarding(
-                f"La auditoría interna pide corregir: {evaluacion.feedback}"
-            )
-
-        # Borrador listo para el humano.
-        _set_frontmatter(self._project_dir, "estado", "PENDING_REVIEW")
-        st = state.load(self._project_dir)
-        st.active_repl = state.REPL_EXTERNAL
-        st.active_subagent = None
-        st.transaction_lock = False
-        st.pending_approval_file = "document-extract.md"
-        st.current_phase = state.PHASE_HUMAN_REVIEW
-        state.save(self._project_dir, st)
-        return resultado.text
-
-    # --- Cierre del documento (aprobación) -----------------------------------
-
-    async def _aprobar(self) -> None:
-        """Promueve el documento a APPROVED y deja el harness listo para trabajar."""
-        _set_frontmatter(self._project_dir, "estado", "APPROVED")
-        _set_frontmatter(self._project_dir, "confirmado_por_humano", "si")
-        _sincronizar_persistencia(self._project_dir)
-        await self._cerrar_onboarding()
-
-        st = state.load(self._project_dir)
-        st.pending_approval_file = None
-        st.current_phase = state.PHASE_READY_FOR_WORK
-        st.active_repl = state.REPL_EXTERNAL
-        st.transaction_lock = False
-        state.save(self._project_dir, st)
-
-    # --- Presentación --------------------------------------------------------
-
-    def _pedir_scope(self) -> None:
-        print(
-            f"\n[sda] Proyecto nuevo inicializado.\n"
-            f"      Edita {bootstrap.SCOPE_FILE} con las ideas de tu proyecto y,\n"
-            f"      cuando termines, escribe 'listo' aquí para continuar.\n"
-        )
-
-    def _presentar_borrador(self, resumen: str) -> None:
-        print(
-            f"\n[sda] Borrador listo para tu revisión: {bootstrap.EXTRACT_FILE}\n\n"
-            f"----- resumen del onboarding-reader -----\n\n{resumen}\n\n"
-            f"-----------------------------------------\n\n"
-            f"      Revísalo en tu editor y responde:\n"
-            f"        aprobar                 -> lo doy por bueno\n"
-            f"        rechazar <observación>  -> pido correcciones\n"
-        )
-
-    # --- Bucle externo (orquestador) -----------------------------------------
+        self._tools = LeaderTools(provider, project_dir)
 
     async def run(self) -> int:
         """Ejecuta el bucle externo hasta que el humano salga. Devuelve el exit code."""
@@ -215,19 +89,22 @@ class Orchestrator:
         recien_creado = bootstrap.bootstrap(self._project_dir)
         st = state.load(self._project_dir)
 
-        print("[sda] orquestador — escribe 'salir' para terminar")
-        if recien_creado or st.current_phase == state.PHASE_BOOTSTRAPPING:
-            self._pedir_scope()
-        elif st.current_phase == state.PHASE_HUMAN_REVIEW:
-            print(
-                f"\n[sda] Hay un borrador esperando tu decisión: "
-                f"{bootstrap.EXTRACT_FILE}. Responde 'aprobar' o "
-                f"'rechazar <observación>'.\n"
-            )
-        elif st.current_phase == state.PHASE_READY_FOR_WORK:
-            print("\n[sda] Onboarding ya aprobado. Proyecto listo para trabajar.\n")
+        leader = self._provider.create_session(
+            system_prompt=load_prompt(_LEADER_PROMPT_FILE),
+            cwd=str(self._project_dir),
+            builtin_tools=_LEADER_TOOLS,
+            model=_LEADER_MODEL,
+            effort=_LEADER_EFFORT,
+            in_process_tools=self._tools.as_in_process_tools(),
+        )
+
+        print("[sda] orquestador (líder-agente) — escribe 'salir' para terminar\n")
 
         try:
+            # El líder abre saludando, orientado por el estado actual del proyecto.
+            apertura = await leader.send(_mensaje_apertura(st, recien_creado))
+            print(f"[líder] {apertura.text}\n")
+
             while True:
                 try:
                     linea = (await prompt_line("[User] > ")).strip()
@@ -239,71 +116,12 @@ class Orchestrator:
                 if linea.lower() in _COMANDOS_SALIDA:
                     break
 
-                if not await self._despachar(linea):
-                    break
+                resultado = await leader.send(linea)
+                print(f"\n[líder] {resultado.text}\n")
         finally:
-            await self._cerrar_onboarding()
+            await self._tools.cerrar()
+            await leader.close()
         return 0
-
-    async def _despachar(self, linea: str) -> bool:
-        """Procesa una línea según la fase actual. Devuelve ``False`` para salir."""
-        st = state.load(self._project_dir)
-        fase = st.current_phase
-
-        if fase in (state.PHASE_BOOTSTRAPPING, state.PHASE_ONBOARDING):
-            if linea.lower() in _COMANDOS_CONTINUAR:
-                if not _scope_esta_lleno(self._project_dir):
-                    print(
-                        f"[sda] {bootstrap.SCOPE_FILE} sigue vacío. Escribe tus "
-                        f"ideas y vuelve a intentarlo."
-                    )
-                    return True
-                await self._abrir_onboarding()
-                resumen = await self._conducir_onboarding(_INSTRUCCION_INICIAL)
-                self._presentar_borrador(resumen)
-            else:
-                self._pedir_scope()
-            return True
-
-        if fase == state.PHASE_HUMAN_REVIEW:
-            return await self._despachar_revision(linea)
-
-        if fase == state.PHASE_READY_FOR_WORK:
-            print("[sda] Onboarding aprobado. (Las fases siguientes aún no existen.)")
-            return True
-
-        print(f"[sda] Fase '{fase}' no manejada en esta versión.")
-        return True
-
-    async def _despachar_revision(self, linea: str) -> bool:
-        """Maneja la puerta humana: aprobar / rechazar <feedback>."""
-        palabras = linea.split(maxsplit=1)
-        comando = palabras[0].lower()
-
-        if comando in {"aprobar", "aprobado", "approve"}:
-            await self._aprobar()
-            print(
-                f"\n[sda] Documento APROBADO. {bootstrap.EXTRACT_FILE} bloqueado.\n"
-                f"      Proyecto listo para la jornada de trabajo.\n"
-            )
-            return True
-
-        if comando in {"rechazar", "rechazado", "reject"}:
-            feedback = palabras[1] if len(palabras) > 1 else ""
-            if not feedback:
-                print("[sda] Indica qué corregir: 'rechazar <observación>'.")
-                return True
-            await self._abrir_onboarding()  # sigue viva; garantía por si acaso
-            resumen = await self._conducir_onboarding(
-                f"El humano rechazó el borrador con esta observación: {feedback}\n"
-                f"Ajusta SOLO lo señalado en _prototype/document-extract.md y "
-                f"responde con tu resumen ejecutivo actualizado."
-            )
-            self._presentar_borrador(resumen)
-            return True
-
-        print("[sda] Responde 'aprobar' o 'rechazar <observación>'.")
-        return True
 
 
 async def run_orchestrator(provider: Provider, project_dir: Path) -> int:

@@ -33,6 +33,8 @@
 - [D-027 — El bucle interno se invoca vía herramienta en-proceso, no vía subagente nativo del SDK](#d-027--el-bucle-interno-se-invoca-vía-herramienta-en-proceso-no-vía-subagente-nativo-del-sdk)
 - [D-028 — La puerta de aprobación humana es un límite forzado por herramienta](#d-028--la-puerta-de-aprobación-humana-es-un-límite-forzado-por-herramienta)
 - [D-029 — La señal humana de "continuar" pasa a intención en lenguaje natural, validada por herramienta determinista](#d-029--la-señal-humana-de-continuar-pasa-a-intención-en-lenguaje-natural-validada-por-herramienta-determinista)
+- [D-030 — D-026 a D-029 quedan firmes como decisiones implementadas y verificadas](#d-030--d-026-a-d-029-quedan-firmes-como-decisiones-implementadas-y-verificadas)
+- [D-031 — El sandbox real por-agente se implementa con `builtin_tools` (`tools=` del SDK), no con `allowed_tools`](#d-031--el-sandbox-real-por-agente-se-implementa-con-builtin_tools-tools-del-sdk-no-con-allowed_tools)
 
 ## Detalle
 
@@ -272,6 +274,20 @@ TripleS_Harness/
 **Razón:** un líder conversacional puede/debe interpretar lenguaje natural (es su valor agregado frente al comando exacto), pero la decisión de si el scope está realmente listo no puede depender de que el LLM "lo crea"; se conserva el espíritu de D-022 (una condición objetiva, no una heurística de archivo cambiado) mediante una herramienta explícita.
 **Alternativas consideradas:** mantener la palabra exacta también con el líder conversacional (descartada: contradice el valor de tener un líder que entienda lenguaje natural); dejar que el líder decida sin herramienta si el scope está listo (descartada: mismo riesgo que D-028, el LLM no debe ser el único juez de una condición que afecta el estado del harness).
 **Impacto:** ref T-027, T-028 (`src/sda/tools/scope_esta_lleno`), D-022 (matizada, no invalidada).
+
+### D-030 — D-026 a D-029 quedan firmes como decisiones implementadas y verificadas
+**Fecha:** 2026-07-24
+**Decisión:** las decisiones propuestas D-026 a D-029 (documento de diseño de T-027) se registran como decisiones firmes del proyecto, no ya propuestas, porque T-028 las implementó y verificó en vivo end-to-end.
+**Razón:** el análisis (T-027) quedó respaldado por implementación real y prueba en vivo (T-028); no hay razón para mantenerlas como "propuestas" una vez construidas y confirmadas funcionando.
+**Alternativas consideradas:** ninguna; es solo la formalización de decisiones ya tomadas en T-027 tras su verificación en T-028.
+**Impacto:** ref T-027, T-028.
+
+### D-031 — El sandbox real por-agente se implementa con `builtin_tools` (`tools=` del SDK), no con `allowed_tools`
+**Fecha:** 2026-07-24
+**Decisión:** el sandbox por-agente (qué herramientas nativas puede usar cada sesión) se implementa con el nuevo parámetro `builtin_tools` de `Provider.create_session` (mapeado a `tools=` de `ClaudeAgentOptions`), no con `allowed_tools`. El líder (`orchestrator-leader`) queda con `builtin_tools=["Read","Glob","Grep"]` (solo lectura); el onboarding-reader con `builtin_tools=["Read","Glob","Grep","Write"]` (lectura + escritura de su entregable). Las herramientas MCP en-proceso del líder (`scope_esta_lleno`, `run_inner_loop`, `promote_to_approved`) siguen disponibles porque no son "builtin".
+**Razón:** se descubrió (ver L-013) que `allowed_tools` bajo `permission_mode="bypassPermissions"` no restringe el toolset, solo auto-aprueba; por lo tanto el modelo de "manos atadas" que T-024/T-027/D-026 asumían para el sandbox del líder y del onboarding-reader era nominal, no real. `tools=`/`disallowed_tools=` es el mecanismo verificado que sí restringe de verdad qué herramientas nativas existen para una sesión.
+**Alternativas consideradas:** mantener `allowed_tools` como mecanismo de sandbox (descartada: no cumple la función de seguridad que se le atribuía); usar `disallowed_tools` (denylist) en vez de `builtin_tools`/`tools=` (allowlist) (descartada: una allowlist explícita por agente es más segura por defecto que una denylist que exige enumerar todo lo que se quiere prohibir).
+**Impacto:** ref T-028, D-026 (nota: la afirmación de sandbox de T-024/onboarding-reader también era nominal hasta este hardening), L-013.
 
 <!--
 ### D-XXX — Título breve

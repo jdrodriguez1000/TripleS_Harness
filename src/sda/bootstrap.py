@@ -36,7 +36,8 @@ _SCOPE_STUB = """\
      restricción o preferencia. No te preocupes por el orden ni por que quede
      perfecto: el harness se encarga de ordenarlo y de preguntarte los huecos.
 
-     Cuando termines de escribir, vuelve a la terminal y escribe: listo -->
+     Cuando termines de escribir, vuelve a la terminal y avísale al harness
+     (con tus propias palabras) que ya terminaste. -->
 """
 
 

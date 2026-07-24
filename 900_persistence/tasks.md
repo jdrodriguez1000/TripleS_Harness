@@ -39,7 +39,7 @@
 | T-025 | Prueba manual interactiva end-to-end de `sda start` (bootstrap → editar scope.md a mano → onboarding-reader → rechazar → aprobar) | Implementada |
 | T-026 | Fijar explícitamente modelo y esfuerzo de razonamiento del onboarding-reader (Sonnet + effort high) en vez del default implícito del CLI/SDK | Implementada |
 | T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | Implementada |
-| T-028 | Implementar el rediseño de T-027: herramientas en-proceso, prompt del orchestrator-leader y refactor de orchestrator.py | No implementada |
+| T-028 | Implementar el rediseño de T-027: herramientas en-proceso, prompt del orchestrator-leader y refactor de orchestrator.py | Implementada |
 
 ## Detalle de tareas
 
@@ -261,7 +261,7 @@ Se diseñó y ejecutó en vivo el spike `spikes/t027_herramienta_en_proceso.py`,
 Con el análisis y el spike verificados, T-027 queda completa como tarea de diseño; la implementación del rediseño se traslada a la nueva T-028.
 
 ### T-028 — Implementar el rediseño del orchestrator-leader (T-027)
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-24
 **Fecha actualización:** 2026-07-24
 
@@ -272,3 +272,7 @@ Tarea de implementación derivada de T-027, en la misma rama `t-027-sesion-lider
 - Posiblemente extender `Provider.create_session`/`ClaudeSDKProvider` (`src/sda/core/provider.py`, `src/sda/providers/claude_sdk.py`) para aceptar herramientas en-proceso (`mcp_servers`/`allowed_tools` con nombres `mcp__<server>__<tool>`), análogo a como T-026 extendió `model`/`effort`.
 
 Después de implementar: prueba end-to-end en vivo del flujo rediseñado (análoga a T-025, corrida real de `sda start` en terminal) y, si convence, merge de `t-027-sesion-lider` a master.
+
+**Implementación (2026-07-24):** creados `src/sda/core/tool.py` (`InProcessTool`, abstracción SDK-agnóstica: nombre, descripción, parámetros, handler que devuelve texto), `src/sda/tools/__init__.py` y `src/sda/tools/leader_tools.py` (clase `LeaderTools` con las tres herramientas planeadas, moviendo aquí la lógica que antes vivía en `Orchestrator._conducir_onboarding`/`_aprobar`) y `src/sda/prompts/orchestrator_leader.md` (system prompt del líder). `src/sda/orchestrator.py` quedó refactorizado por completo: eliminado el if/elif de fases; construye la sesión del líder con sus herramientas en-proceso y expone el bucle conversacional humano↔líder, con un mensaje de apertura contextual según la fase (`_mensaje_apertura`). `src/sda/core/provider.py` y `src/sda/providers/claude_sdk.py` ganaron el parámetro `in_process_tools` en `create_session` (registradas como servidor MCP en-proceso vía `create_sdk_mcp_server`+`@tool`, nombres `mcp__harness__<tool>`); el SDK sigue importándose solo en `providers/` (D-010 preservado). `src/sda/bootstrap.py` se ajustó para que el stub de `scope.md` ya no exija la palabra exacta "listo" (D-029). Verificado en vivo con prueba end-to-end real (Opus real conduciendo Sonnet real): llegó hasta `document-extract.md` con `estado: APPROVED` + `confirmado_por_humano: si`, fase `READY_FOR_WORK`, lock liberado y `progress.md` sincronizado.
+
+**Hallazgo de seguridad y hardening (2026-07-24):** al probar en una carpeta de proyecto real (fuera del repo), se detectó que las citas del líder (números de línea) eran reales porque el líder tenía en la práctica acceso de lectura sin restricción. Se confirmó (docs oficiales de `claude-agent-sdk` + pruebas en vivo) que `allowed_tools` NO restringe el toolset bajo `permission_mode="bypassPermissions"`: solo auto-aprueba, no quita herramientas; por lo tanto el "sandbox" que se creía tener tanto en el líder como en el onboarding-reader (desde T-024) nunca restringió nada de verdad (ver L-013). El mecanismo real de restricción es `tools=`/`disallowed_tools=`, verificado en vivo (`tools=["Glob"]` impide leer archivos). Se agregó el parámetro `builtin_tools` al contrato `Provider.create_session` (mapea a `tools=` del SDK), como sandbox duro por agente, distinto de `allowed_tools`: el líder pasó a `builtin_tools=["Read","Glob","Grep"]` (solo lectura) y el onboarding-reader de `allowed_tools=[...]` a `builtin_tools=["Read","Glob","Grep","Write"]` (ver D-031). Verificado en vivo en dos pruebas: (1) sandbox duro — sesión de solo lectura, ante orden explícita de crear `HACK.txt`, respondió que no podía y el archivo no se creó; (2) E2E completo post-hardening llegó de nuevo a APPROVED/READY_FOR_WORK, confirmando que las herramientas MCP en-proceso siguen funcionando bajo `builtin_tools` restrictivo y que el onboarding-reader sigue pudiendo escribir su entregable dentro de su sandbox. El merge de `t-027-sesion-lider` a master queda explícitamente pospuesto por el usuario (no se hace en esta sesión).

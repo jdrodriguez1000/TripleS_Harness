@@ -16,14 +16,21 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     TextBlock,
+    create_sdk_mcp_server,
+    tool,
 )
 
 from sda.core.provider import Provider
 from sda.core.session import Session, TurnResult
+from sda.core.tool import InProcessTool
 
 # Variables de entorno que, si están presentes, harían que el SDK autentique con
 # API key/token en lugar de la suscripción. Ver L-004, C-003.
 _API_ENV_VARS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+
+# Nombre del servidor MCP en-proceso bajo el que se registran las herramientas del
+# líder. Los nombres que ve el modelo quedan como ``mcp__<server>__<tool>``.
+_MCP_SERVER_NAME = "harness"
 
 
 def _subscription_env() -> dict[str, str]:
@@ -37,6 +44,28 @@ def _subscription_env() -> dict[str, str]:
     for name in _API_ENV_VARS:
         os.environ.pop(name, None)
     return {name: "" for name in _API_ENV_VARS}
+
+
+def _mcp_tool_name(name: str) -> str:
+    """Nombre con el que el modelo ve una herramienta del servidor en-proceso."""
+    return f"mcp__{_MCP_SERVER_NAME}__{name}"
+
+
+def _a_sdk_tool(t: InProcessTool):
+    """Adapta un ``InProcessTool`` SDK-agnóstico a una herramienta del Agent SDK.
+
+    Envuelve el handler de dominio (que devuelve texto plano) en la forma cruda que
+    el SDK espera (``{"content": [{"type": "text", ...}]}``), de modo que ``sda.tools``
+    no tenga que conocer el SDK (D-010, D-012). Cada herramienta se define en su
+    propia función para que el decorador ``@tool`` capture el ``t`` correcto.
+    """
+
+    @tool(t.name, t.description, t.parameters)
+    async def _envuelta(args: dict) -> dict:
+        texto = await t.handler(args)
+        return {"content": [{"type": "text", "text": texto}]}
+
+    return _envuelta
 
 
 class ClaudeSDKSession(Session):
@@ -96,8 +125,10 @@ class ClaudeSDKProvider(Provider):
         system_prompt: str | None = None,
         cwd: str | None = None,
         allowed_tools: list[str] | None = None,
+        builtin_tools: list[str] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        in_process_tools: list[InProcessTool] | None = None,
     ) -> Session:
         """Crea (aún sin conectar) una ``ClaudeSDKSession`` lista para usarse.
 
@@ -111,17 +142,43 @@ class ClaudeSDKProvider(Provider):
         razonamiento de esta sesión (T-026); si vienen en ``None``, se usa el default
         del proveedor, y si tampoco lo hay, el default implícito del CLI/SDK. El SDK
         acepta ``effort`` en ``low|medium|high|xhigh|max`` (mapeado a ``--effort``).
+
+        ``in_process_tools`` se registran como un **servidor MCP en-proceso** del SDK
+        (verificado en el spike T-027); sus nombres (``mcp__harness__<tool>``) se
+        añaden automáticamente a las herramientas permitidas para que el modelo pueda
+        invocarlas. Es el mecanismo del líder-agente (D-026, D-027).
+
+        ``builtin_tools`` fija el conjunto base de herramientas nativas (``tools`` del
+        SDK). A diferencia de ``allowed_tools`` (que solo auto-aprueba), este SÍ es un
+        límite duro bajo ``bypassPermissions``: lo verificamos en vivo (una sesión con
+        ``tools=["Glob"]`` no pudo leer archivos). Es el sandbox real por agente. Las
+        herramientas en-proceso (MCP) no son "builtin" y siguen disponibles aunque
+        ``builtin_tools`` sea restrictivo, porque se registran vía ``mcp_servers``.
         """
         modelo = model if model is not None else self._model
         esfuerzo = effort if effort is not None else self._effort
+
+        tools_base = allowed_tools if allowed_tools is not None else ["ToolSearch"]
 
         opciones: dict[str, object] = {
             "system_prompt": system_prompt,
             # Modo no interactivo: sin humano que responda diálogos de permiso.
             "permission_mode": "bypassPermissions",
-            "allowed_tools": allowed_tools if allowed_tools is not None else ["ToolSearch"],
+            "allowed_tools": list(tools_base),
             "env": _subscription_env(),
         }
+        if builtin_tools is not None:
+            # Sandbox duro: solo estas herramientas nativas existen para el agente.
+            opciones["tools"] = list(builtin_tools)
+        if in_process_tools:
+            servidor = create_sdk_mcp_server(
+                _MCP_SERVER_NAME,
+                tools=[_a_sdk_tool(t) for t in in_process_tools],
+            )
+            opciones["mcp_servers"] = {_MCP_SERVER_NAME: servidor}
+            opciones["allowed_tools"] = list(tools_base) + [
+                _mcp_tool_name(t.name) for t in in_process_tools
+            ]
         if cwd is not None:
             opciones["cwd"] = cwd
         if modelo is not None:
