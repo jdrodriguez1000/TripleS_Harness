@@ -37,7 +37,8 @@
 | T-023 | Capturar uso de tokens y costo por turno en TurnResult (ResultMessage del SDK) | No implementada |
 | T-024 | Implementar la primera rebanada vertical del doble bucle: máquina de estados en disco, bootstrap, bucle interno onboarding-reader y puerta de aprobación humana | Implementada |
 | T-025 | Prueba manual interactiva end-to-end de `sda start` (bootstrap → editar scope.md a mano → onboarding-reader → rechazar → aprobar) | Implementada |
-| T-026 | Fijar explícitamente modelo y esfuerzo de razonamiento por agente (orquestador, onboarding-reader, evaluador) en vez del default implícito del CLI/SDK | No implementada |
+| T-026 | Fijar explícitamente modelo y esfuerzo de razonamiento del onboarding-reader (Sonnet + effort high) en vez del default implícito del CLI/SDK | Implementada |
+| T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | No implementada |
 
 ## Detalle de tareas
 
@@ -218,9 +219,38 @@ Pedido explícito del usuario: correr `sda start` de verdad en una terminal (no 
 
 **Verificación en vivo (2026-07-24):** ejecutado varias veces en terminal real (`sda_test_004`, `sda_test_005`, `sda_test_006`), con el paquete `sda` instalado en modo editable (`pip install -e`) dentro de un entorno virtual en cada carpeta de prueba, fuera del repo. Flujo completo confirmado: bootstrap → edición manual de `_context/scope.md` → señal `listo` → bucle interno onboarding-reader → generación de `_prototype/document-extract.md` → puerta de aprobación humana → `aprobar` → documento bloqueado como `APPROVED`. En la primera corrida (`sda_test_004`) el resumen del onboarding-reader se vio pegado visualmente al comando `aprobar` escrito por el usuario; se confirmó que fue solo un artefacto de que el usuario tecleó su respuesta pegada al texto en la terminal, no un bug de truncamiento ni de lógica. A partir de este hallazgo se hicieron ajustes de UX de mensajería en `orchestrator.py`/`repl.py` (ver D-024), verificados limpios y espaciados en `sda_test_006`. Nota de diseño confirmada (no bug): el comando de continuar requiere coincidencia exacta (D-022); `listo continua` con texto extra no se reconoce, y esto es intencional.
 
-### T-026 — Fijar explícitamente modelo y esfuerzo de razonamiento por agente
+### T-026 — Fijar explícitamente modelo y esfuerzo de razonamiento del onboarding-reader
+**Estado:** Implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+**Implementación (2026-07-24):** se agregó `effort` (además de `model`) al `Provider` ABC (`create_session`) y a `ClaudeSDKProvider` (default de proveedor + override por sesión, pasados a `ClaudeAgentOptions` solo si no son `None`). En `orchestrator.py` se fijaron las constantes `_ONBOARDING_MODEL="sonnet"` y `_ONBOARDING_EFFORT="high"`, cableadas en `_abrir_onboarding`. Verificado en vivo: (1) construcción de opciones correcta (`model=sonnet`, `effort=high`; defaults quedan `None`, sin regresión); (2) llamada real al SDK con esas opciones respondió OK, confirmando que el CLI acepta `--model`/`--effort` y que `effort` funciona sin requerir `thinking` adaptive. Modelo aceptado con el alias `"sonnet"`. Sesión principal/líder (Opus + high) queda diferida a T-027.
+
+
+Durante la verificación de T-025 se revisó el código (`src/sda/providers/claude_sdk.py`, `src/sda/cli.py`) y se confirmó que hoy el harness NO fija explícitamente ni el modelo de Anthropic ni el esfuerzo de razonamiento para ninguna sesión: `ClaudeSDKProvider()` se instancia sin argumento `model` en `cli.py::_cmd_start`, y `ClaudeAgentOptions` solo setearía `model` si no fuera `None` (nunca ocurre hoy); no existe ningún parámetro de esfuerzo (`effort`) en las opciones actuales. Todo queda delegado al default implícito del CLI/SDK según la suscripción del usuario.
+
+**Decisión del usuario (2026-07-24):** el `onboarding-reader` debe usar **Sonnet + effort `high`**. La configuración del orquestador/sesión principal con Opus + high queda fuera de esta tarea y se traslada a T-027 (análisis), porque hoy el bucle externo (`orchestrator.py::run`) es Python puro y no abre ninguna sesión contra el LLM.
+
+**Alcance de T-026 (solo onboarding-reader):**
+- `src/sda/providers/claude_sdk.py`: dar soporte a `effort` (además del `model` ya existente); `create_session` los pasa a `ClaudeAgentOptions` solo si no son `None` (mismo patrón condicional actual). El SDK expone `ClaudeAgentOptions.model` y `ClaudeAgentOptions.effort` con `EffortLevel = low|medium|high|xhigh|max` (verificado vía docs del SDK).
+- Mecanismo por-agente: agregar parámetros `model`/`effort` a `create_session(...)` para que cada agente elija su combinación (deja el camino listo para el futuro líder de T-027).
+- `src/sda/orchestrator.py::_abrir_onboarding` (~línea 114): pasar `model="sonnet"`, `effort="high"` al crear la sesión interna.
+- Verificar antes de cerrar: (a) valor de modelo que acepta el CLI (alias `"sonnet"` vs. id `claude-sonnet-5`); (b) si `effort` funciona por sí solo o requiere además `thinking={"type":"adaptive"}`.
+- Verificación funcional: `sda start` end-to-end (bootstrap → onboarding-reader → aprobar) confirmando que el subproceso del CLI recibe `--model` y `--effort`, sin regresiones respecto a T-025.
+
+Sin prioridad urgente; agrupada con las tareas de infraestructura pausadas.
+
+### T-027 — Analizar el agente como sesión principal/líder que orqueste todo
 **Estado:** No implementada
 **Fecha creación:** 2026-07-24
 **Fecha actualización:** 2026-07-24
 
-Durante la verificación de T-025 se revisó el código (`src/sda/providers/claude_sdk.py`, `src/sda/cli.py`) y se confirmó que hoy el harness NO fija explícitamente ni el modelo de Anthropic ni el esfuerzo de razonamiento (reasoning effort/thinking) para ninguna sesión: `ClaudeSDKProvider()` se instancia sin argumento `model` en `cli.py::_cmd_start`, y `ClaudeAgentOptions` solo setearía `model` si no fuera `None` (nunca ocurre hoy); no existe ningún parámetro de esfuerzo/thinking en las opciones actuales. Todo queda delegado al default implícito del CLI/SDK según la suscripción del usuario. Pendiente: decidir y fijar explícitamente qué modelo y qué nivel de esfuerzo debe usar cada agente del harness (orquestador-leader, onboarding-reader, evaluador futuro), en vez de depender de ese default implícito. Sin prioridad urgente; agrupada con las tareas de infraestructura pausadas (T-010, T-011, T-018, T-020, T-021, T-023).
+Tarea de análisis (no de implementación) surgida al acotar T-026. Hoy el bucle externo del orquestador (`orchestrator.py::run`) es Python puro: imprime mensajes y lee el teclado del humano, pero NO abre ninguna sesión contra el LLM. La única sesión real contra Claude es la interna del `onboarding-reader`. El usuario quiere que en el futuro exista un agente "líder" como sesión principal (con **Opus + effort `high`**) que conduzca la conversación con el humano y orqueste el doble bucle, en vez de ser código Python fijo.
+
+Pendiente de analizar (sin implementar aún):
+- Diseño: cómo un agente líder conversacional convive con la máquina de estados y los comandos actuales (`listo`, `aprobar`, `rechazar`), y cómo mantiene la observabilidad del bucle interno (Forma A).
+- Impacto en `orchestrator.py`, `repl.py` (hoy `run_repl` es código sin uso) y `cli.py`.
+- Costo y latencia de tener Opus corriendo de forma persistente en el bucle externo.
+- Cómo se cablea Opus + high reutilizando el mecanismo por-agente que deja listo T-026.
+
+A analizar en una sesión futura antes de decidir su implementación.

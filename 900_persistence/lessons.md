@@ -13,6 +13,8 @@
 - [L-007 — La consola de Windows (cp1252) rompe al imprimir emojis del modelo](#l-007--la-consola-de-windows-cp1252-rompe-al-imprimir-emojis-del-modelo)
 - [L-008 — Completar tareas de infraestructura no equivale a construir el producto core del harness](#l-008--completar-tareas-de-infraestructura-no-equivale-a-construir-el-producto-core-del-harness)
 - [L-009 — Un texto de terminal que se ve "pegado"/cortado puede ser el usuario tecleando encima, no un bug de truncamiento](#l-009--un-texto-de-terminal-que-se-ve-pegadocortado-puede-ser-el-usuario-tecleando-encima-no-un-bug-de-truncamiento)
+- [L-010 — `effort` del SDK funciona por sí solo, sin requerir `thinking` adaptive, y no se reporta de vuelta](#l-010--effort-del-sdk-funciona-por-sí-solo-sin-requerir-thinking-adaptive-y-no-se-reporta-de-vuelta)
+- [L-011 — El CLI usa un modelo auxiliar (Haiku) para tareas internas de infraestructura, independiente del modelo fijado por agente](#l-011--el-cli-usa-un-modelo-auxiliar-haiku-para-tareas-internas-de-infraestructura-independiente-del-modelo-fijado-por-agente)
 
 ## Detalle
 
@@ -69,6 +71,18 @@
 **Contexto:** en la primera corrida manual de `sda start` (ref T-025, `sda_test_004`), el resumen del onboarding-reader se vio visualmente pegado al comando `aprobar` escrito por el usuario en la terminal, sugiriendo a primera vista un corte de texto o un bug de sincronización de la salida.
 **Lección:** al investigar, se confirmó que el texto del resumen no estaba truncado ni la lógica fallaba; el usuario simplemente escribió su respuesta pegada al final del texto impreso, sin salto de línea de por medio. Un síntoma visual de "texto cortado/pegado" en una interfaz de terminal puede tener una causa mucho más simple (timing de tecleo del humano) que un defecto de la lógica del programa.
 **Aplicación:** ante un reporte de "se ve cortado/pegado" en salida de consola, primero descartar una explicación simple de interacción humano-terminal (falta de salto de línea, tecleo simultáneo) antes de asumir un bug de truncamiento; de todos modos, si mejora la legibilidad, es válido añadir espaciado/prefijos por hablante para evitar la ambigüedad visual en el futuro (ver D-024).
+
+### L-010 — `effort` del SDK funciona por sí solo, sin requerir `thinking` adaptive, y no se reporta de vuelta
+**Fecha:** 2026-07-24
+**Contexto:** al implementar y verificar T-026 (fijar `model="sonnet"`/`effort="high"` para el onboarding-reader) en `src/sda/providers/claude_sdk.py`.
+**Lección:** `ClaudeAgentOptions.effort` (`EffortLevel = low|medium|high|xhigh|max`) mapea directamente a `--effort` del CLI y funciona de forma independiente, sin necesidad de activar `thinking={"type":"adaptive"}` ni ningún otro parámetro adicional. Sin embargo, el SDK no devuelve el `effort` usado en ninguna parte de la respuesta (`AssistantMessage`, `ResultMessage.model_usage`); solo se puede confirmar por observación indirecta (comportamiento del modelo) o instrumentación temporal de debug.
+**Aplicación:** al fijar `effort` para cualquier agente futuro del harness, no asumir que hace falta configurar `thinking` en paralelo; y si se necesita verificar en vivo qué `effort` se está aplicando realmente, no confiar en la telemetría del SDK, sino en pruebas controladas o logging temporal.
+
+### L-011 — El CLI usa un modelo auxiliar (Haiku) para tareas internas de infraestructura, independiente del modelo fijado por agente
+**Fecha:** 2026-07-24
+**Contexto:** durante la verificación en vivo de T-026 (`sda start` real, proyecto `sda_test_007`), se observó un uso mínimo de `claude-haiku-4-5` en la telemetría de la sesión, a pesar de haber fijado `model="sonnet"` para el onboarding-reader.
+**Lección:** el CLI de Claude Code invoca internamente un modelo auxiliar más económico (Haiku) para tareas de infraestructura propias del proceso (p. ej. resúmenes o gestión interna de tareas), separado del modelo que el harness fija explícitamente para el trabajo del agente. Ese uso de Haiku no es un error ni una fuga del modelo configurado.
+**Aplicación:** al revisar telemetría de uso/costo por modelo (relevante para T-023/T-011), no interpretar apariciones de un modelo distinto al fijado como una falla de configuración; distinguir entre el modelo del agente y el modelo auxiliar de infraestructura del CLI.
 
 <!--
 ### L-XXX — Título breve

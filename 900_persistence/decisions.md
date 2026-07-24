@@ -28,6 +28,7 @@
 - [D-022 — Señal explícita del humano ("listo"/"continuar") para pasar de bootstrap a onboarding](#d-022--señal-explícita-del-humano-listocontinuar-para-pasar-de-bootstrap-a-onboarding)
 - [D-023 — Áreas de descubrimiento §1–§10 adoptadas de una plantilla existente del usuario, regla "se cita, no se interpreta"](#d-023--áreas-de-descubrimiento-1–10-adoptadas-de-una-plantilla-existente-del-usuario-regla-se-cita-no-se-interpreta)
 - [D-024 — UX de mensajería en terminal: prefijos por hablante y espaciado entre bloques](#d-024--ux-de-mensajería-en-terminal-prefijos-por-hablante-y-espaciado-entre-bloques)
+- [D-025 — Fijar Sonnet + effort high para el onboarding-reader; diferir la sesión principal/líder (Opus + high) a T-027](#d-025--fijar-sonnet--effort-high-para-el-onboarding-reader-diferir-la-sesión-principalíder-opus--high-a-t-027)
 
 ## Detalle
 
@@ -232,6 +233,13 @@ TripleS_Harness/
 **Razón:** la primera corrida en vivo (`sda_test_004`) mostró una salida de terminal donde el resumen del onboarding-reader y el prompt del humano quedaban visualmente pegados, dificultando distinguir quién "habla" en cada bloque; aunque se confirmó que no era un bug de truncamiento (fue el usuario tecleando pegado al texto), el usuario decidió mejorar la legibilidad de la interacción humano-harness de cara a los agentes futuros que se sumarán al doble bucle.
 **Alternativas consideradas:** dejar el prompt/mensajería como estaba (`tú>`, un solo bloque de texto sin separación); descartada por preferencia explícita de UX del usuario.
 **Impacto:** ref T-025 (`src/sda/orchestrator.py`, `src/sda/repl.py`). Del mismo espíritu que D-022 (señales explícitas del humano): ambas buscan que la interacción humano-harness sea clara y sin ambigüedad sobre quién dice qué y cuándo.
+
+### D-025 — Fijar Sonnet + effort high para el onboarding-reader; diferir la sesión principal/líder (Opus + high) a T-027
+**Fecha:** 2026-07-24
+**Decisión:** el usuario decidió explícitamente que el onboarding-reader use **Sonnet + effort `high`** (en vez del default implícito del CLI/SDK), y que fijar Opus + effort `high` para una futura sesión principal/líder que orqueste todo el doble bucle quede fuera de esta tarea, trasladado a la nueva tarea de análisis T-027.
+**Razón:** hoy el bucle externo (`orchestrator.py::run`) es código Python puro que no abre ninguna sesión contra el LLM; la única sesión real es la interna del onboarding-reader, por lo que no hay todavía un lugar en el código donde cablear un modelo/effort para un "líder". Introducir esa sesión líder es un cambio de diseño mayor que merece su propio análisis antes de implementarse.
+**Alternativas consideradas:** implementar de una vez el líder Opus+high dentro del alcance de T-026; descartada por ampliar el alcance más allá de lo pedido y por requerir diseño previo (impacto en `orchestrator.py`, `repl.py`, costo/latencia de Opus persistente).
+**Impacto:** ref T-026 (implementada, mecanismo por-agente `model`/`effort` en `Provider.create_session`/`ClaudeSDKProvider` reutilizable), T-027 (análisis pendiente).
 
 <!--
 ### D-XXX — Título breve

@@ -34,6 +34,12 @@ _COMANDOS_CONTINUAR = frozenset({"listo", "continuar"})
 _ONBOARDING_TOOLS = ["Read", "Glob", "Grep", "Write"]
 _ONBOARDING_PROMPT_FILE = "onboarding_reader.md"
 
+# Modelo y esfuerzo de razonamiento fijados explícitamente para el onboarding-reader
+# (T-026), en vez de depender del default implícito del CLI/SDK. Decisión del usuario:
+# Sonnet basta para la extracción/instanciación de la plantilla, con esfuerzo alto.
+_ONBOARDING_MODEL = "sonnet"
+_ONBOARDING_EFFORT = "high"
+
 # Instrucción de arranque del bucle interno (primer turno de la sesión interna).
 _INSTRUCCION_INICIAL = (
     "Ejecuta tu tarea ahora. Lee _context/scope.md, la plantilla "
@@ -115,6 +121,8 @@ class Orchestrator:
             system_prompt=load_prompt(_ONBOARDING_PROMPT_FILE),
             cwd=str(self._project_dir),
             allowed_tools=_ONBOARDING_TOOLS,
+            model=_ONBOARDING_MODEL,
+            effort=_ONBOARDING_EFFORT,
         )
 
     async def _cerrar_onboarding(self) -> None:
@@ -133,7 +141,10 @@ class Orchestrator:
         st.current_phase = state.PHASE_ONBOARDING
         state.save(self._project_dir, st)
 
-        print("\n[sda] Invocando al agente onboarding-reader…")
+        print(
+            f"\n[sda] Invocando al agente onboarding-reader "
+            f"(modelo={_ONBOARDING_MODEL}, effort={_ONBOARDING_EFFORT})…"
+        )
         print(
             f"[onboarding-reader] Trabajando en la construcción de "
             f"{bootstrap.EXTRACT_FILE}. Te aviso cuando termine…\n"

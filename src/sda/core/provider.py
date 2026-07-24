@@ -27,6 +27,8 @@ class Provider(ABC):
         system_prompt: str | None = None,
         cwd: str | None = None,
         allowed_tools: list[str] | None = None,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> Session:
         """Crea (aún sin conectar) una ``Session`` lista para usarse.
 
@@ -38,5 +40,9 @@ class Provider(ABC):
           explorar el bucle interno). Si es ``None``, hereda el del proceso.
         - ``allowed_tools``: herramientas que la sesión puede usar. Si es ``None``,
           la subclase aplica su política por defecto.
+        - ``model``: modelo a usar para esta sesión (p. ej. ``"sonnet"``). Permite
+          fijar el modelo por agente. Si es ``None``, cae al default del proveedor.
+        - ``effort``: nivel de esfuerzo de razonamiento (``low|medium|high|xhigh|max``).
+          Fija el esfuerzo por agente. Si es ``None``, cae al default del proveedor.
         """
         raise NotImplementedError

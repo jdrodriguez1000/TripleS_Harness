@@ -80,13 +80,15 @@ class ClaudeSDKSession(Session):
 class ClaudeSDKProvider(Provider):
     """Fábrica de ``ClaudeSDKSession`` con autenticación por suscripción.
 
-    Configuración mínima por ahora: solo un ``model`` opcional. La política de
-    suscripción y los requisitos del modo no interactivo (C-002) se aplican de forma
-    fija en ``create_session``.
+    Acepta un ``model`` y un ``effort`` opcionales como **defaults del proveedor**;
+    cada llamada a ``create_session`` puede sobreescribirlos para fijar modelo y
+    esfuerzo **por agente** (T-026). La política de suscripción y los requisitos del
+    modo no interactivo (C-002) se aplican de forma fija en ``create_session``.
     """
 
-    def __init__(self, *, model: str | None = None) -> None:
+    def __init__(self, *, model: str | None = None, effort: str | None = None) -> None:
         self._model = model
+        self._effort = effort
 
     def create_session(
         self,
@@ -94,6 +96,8 @@ class ClaudeSDKProvider(Provider):
         system_prompt: str | None = None,
         cwd: str | None = None,
         allowed_tools: list[str] | None = None,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> Session:
         """Crea (aún sin conectar) una ``ClaudeSDKSession`` lista para usarse.
 
@@ -102,7 +106,15 @@ class ClaudeSDKProvider(Provider):
         sesión su propio conjunto de herramientas: por defecto solo ``ToolSearch``
         (obligatorio en modo no interactivo para la carga diferida de esquemas,
         C-002), pero el onboarding-reader necesita además Read/Glob/Grep/Write.
+
+        ``model`` y ``effort`` fijan explícitamente el modelo y el esfuerzo de
+        razonamiento de esta sesión (T-026); si vienen en ``None``, se usa el default
+        del proveedor, y si tampoco lo hay, el default implícito del CLI/SDK. El SDK
+        acepta ``effort`` en ``low|medium|high|xhigh|max`` (mapeado a ``--effort``).
         """
+        modelo = model if model is not None else self._model
+        esfuerzo = effort if effort is not None else self._effort
+
         opciones: dict[str, object] = {
             "system_prompt": system_prompt,
             # Modo no interactivo: sin humano que responda diálogos de permiso.
@@ -112,7 +124,9 @@ class ClaudeSDKProvider(Provider):
         }
         if cwd is not None:
             opciones["cwd"] = cwd
-        if self._model is not None:
-            opciones["model"] = self._model
+        if modelo is not None:
+            opciones["model"] = modelo
+        if esfuerzo is not None:
+            opciones["effort"] = esfuerzo
 
         return ClaudeSDKSession(ClaudeAgentOptions(**opciones))
