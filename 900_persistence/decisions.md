@@ -27,6 +27,7 @@
 - [D-021 — Comunicación bucle externo↔interno vía Forma A: dos Session Python separadas conducidas por el orquestador](#d-021--comunicación-bucle-externointerno-vía-forma-a-dos-session-python-separadas-conducidas-por-el-orquestador)
 - [D-022 — Señal explícita del humano ("listo"/"continuar") para pasar de bootstrap a onboarding](#d-022--señal-explícita-del-humano-listocontinuar-para-pasar-de-bootstrap-a-onboarding)
 - [D-023 — Áreas de descubrimiento §1–§10 adoptadas de una plantilla existente del usuario, regla "se cita, no se interpreta"](#d-023--áreas-de-descubrimiento-1–10-adoptadas-de-una-plantilla-existente-del-usuario-regla-se-cita-no-se-interpreta)
+- [D-024 — UX de mensajería en terminal: prefijos por hablante y espaciado entre bloques](#d-024--ux-de-mensajería-en-terminal-prefijos-por-hablante-y-espaciado-entre-bloques)
 
 ## Detalle
 
@@ -224,6 +225,13 @@ TripleS_Harness/
 **Razón:** `document-extract.md` es insumo del futuro agente entrevistador, cuya función es no repreguntar lo que el scope ya cubre; resolver ambigüedades en esta etapa (en vez de listarlas) le quitaría al entrevistador la información que necesita para decidir qué preguntar. Además el proyecto está en fase de prototipado (meta: prototipo rápido y barato), lo que refuerza reutilizar una plantilla ya probada en vez de diseñar una nueva desde cero.
 **Alternativas consideradas:** que el onboarding-reader interprete/resuelva las ambigüedades del scope; descartada porque usurparía el rol del futuro entrevistador. Diseñar una plantilla nueva de áreas desde cero; descartada por no aportar valor frente a una ya validada por el usuario.
 **Impacto:** ref T-024 (`templates/document-extract-temp.md`, `prompts/onboarding_reader.md`).
+
+### D-024 — UX de mensajería en terminal: prefijos por hablante y espaciado entre bloques
+**Fecha:** 2026-07-24
+**Decisión:** durante la prueba manual de T-025 el usuario pidió, por legibilidad (no por bug), ajustar cómo se ve la interacción en terminal: (1) el prompt del humano cambia de `tú> ` a `[User] > ` en `orchestrator.py` y `repl.py`; (2) la invocación del onboarding-reader se separa en mensajes distintos con prefijos por hablante: `[sda] Invocando al agente onboarding-reader…`, luego `[onboarding-reader] Trabajando en la construcción de _prototype/document-extract.md. Te aviso cuando termine…`, y al terminar `[onboarding-reader] Trabajo terminado.` (todo en el único punto compartido `_conducir_onboarding`, por lo que aplica igual al primer borrador y al flujo de rechazo/corrección); (3) se agregó espaciado (líneas en blanco) entre bloques de mensajes en `_pedir_scope`, `_presentar_borrador`, el mensaje de aprobación y los avisos de fase en `run()`.
+**Razón:** la primera corrida en vivo (`sda_test_004`) mostró una salida de terminal donde el resumen del onboarding-reader y el prompt del humano quedaban visualmente pegados, dificultando distinguir quién "habla" en cada bloque; aunque se confirmó que no era un bug de truncamiento (fue el usuario tecleando pegado al texto), el usuario decidió mejorar la legibilidad de la interacción humano-harness de cara a los agentes futuros que se sumarán al doble bucle.
+**Alternativas consideradas:** dejar el prompt/mensajería como estaba (`tú>`, un solo bloque de texto sin separación); descartada por preferencia explícita de UX del usuario.
+**Impacto:** ref T-025 (`src/sda/orchestrator.py`, `src/sda/repl.py`). Del mismo espíritu que D-022 (señales explícitas del humano): ambas buscan que la interacción humano-harness sea clara y sin ambigüedad sobre quién dice qué y cuándo.
 
 <!--
 ### D-XXX — Título breve

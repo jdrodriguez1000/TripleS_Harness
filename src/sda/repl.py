@@ -60,7 +60,7 @@ async def run_repl(provider: Provider) -> int:
     async with provider.create_session() as session:
         while True:
             try:
-                linea = await prompt_line("tú> ")
+                linea = await prompt_line("[User] > ")
             except (EOFError, KeyboardInterrupt):
                 # Ctrl+Z/Ctrl+D o Ctrl+C: salir limpiamente con un salto de línea.
                 print()

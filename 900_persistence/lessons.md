@@ -12,6 +12,7 @@
 - [L-006 — Las skills son carpetas con SKILL.md, no archivos .py](#l-006--las-skills-son-carpetas-con-skillmd-no-archivos-py)
 - [L-007 — La consola de Windows (cp1252) rompe al imprimir emojis del modelo](#l-007--la-consola-de-windows-cp1252-rompe-al-imprimir-emojis-del-modelo)
 - [L-008 — Completar tareas de infraestructura no equivale a construir el producto core del harness](#l-008--completar-tareas-de-infraestructura-no-equivale-a-construir-el-producto-core-del-harness)
+- [L-009 — Un texto de terminal que se ve "pegado"/cortado puede ser el usuario tecleando encima, no un bug de truncamiento](#l-009--un-texto-de-terminal-que-se-ve-pegadocortado-puede-ser-el-usuario-tecleando-encima-no-un-bug-de-truncamiento)
 
 ## Detalle
 
@@ -62,6 +63,12 @@
 **Contexto:** al iniciar esta sesión, la lista de "próximo" en `progress.md` solo tenía tareas de infraestructura de desarrollo (T-018, T-020, T-021, T-023). Al releer `idea.md` con foco en el producto, se detectó que ninguno de los pilares centrales descritos ahí (doble bucle REPL, máquina de estados en disco, flujo de onboarding con `document-extract.md`, evaluación de calidad interna, puerta de aprobación humana) existía todavía en el código.
 **Lección:** una lista de tareas pendientes puede ir acumulando trabajo de plomería/andamiaje sin que nadie note que el producto central definido en el documento de alcance sigue sin una sola rebanada vertical funcionando; conviene revisar periódicamente contra el documento de alcance original, no solo contra la lista de tareas acumulada.
 **Aplicación:** al priorizar próximas tareas, verificar explícitamente contra `idea.md` (o el documento de alcance vigente) si ya existe al menos una rebanada vertical end-to-end del producto core antes de seguir sumando tareas de infraestructura alrededor de él. Ver D-020, T-024.
+
+### L-009 — Un texto de terminal que se ve "pegado"/cortado puede ser el usuario tecleando encima, no un bug de truncamiento
+**Fecha:** 2026-07-24
+**Contexto:** en la primera corrida manual de `sda start` (ref T-025, `sda_test_004`), el resumen del onboarding-reader se vio visualmente pegado al comando `aprobar` escrito por el usuario en la terminal, sugiriendo a primera vista un corte de texto o un bug de sincronización de la salida.
+**Lección:** al investigar, se confirmó que el texto del resumen no estaba truncado ni la lógica fallaba; el usuario simplemente escribió su respuesta pegada al final del texto impreso, sin salto de línea de por medio. Un síntoma visual de "texto cortado/pegado" en una interfaz de terminal puede tener una causa mucho más simple (timing de tecleo del humano) que un defecto de la lógica del programa.
+**Aplicación:** ante un reporte de "se ve cortado/pegado" en salida de consola, primero descartar una explicación simple de interacción humano-terminal (falta de salto de línea, tecleo simultáneo) antes de asumir un bug de truncamiento; de todos modos, si mejora la legibilidad, es válido añadir espaciado/prefijos por hablante para evitar la ambigüedad visual en el futuro (ver D-024).
 
 <!--
 ### L-XXX — Título breve

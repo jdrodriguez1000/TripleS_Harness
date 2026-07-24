@@ -133,8 +133,13 @@ class Orchestrator:
         st.current_phase = state.PHASE_ONBOARDING
         state.save(self._project_dir, st)
 
-        print("[sda] bucle interno: onboarding-reader trabajando…")
+        print("\n[sda] Invocando al agente onboarding-reader…")
+        print(
+            f"[onboarding-reader] Trabajando en la construcción de "
+            f"{bootstrap.EXTRACT_FILE}. Te aviso cuando termine…\n"
+        )
         resultado = await self._inner.send(instruccion)
+        print("[onboarding-reader] Trabajo terminado.")
 
         # El entregable ya está en disco; se somete a la eval interna (stub por ahora).
         evaluacion = evaluate_draft(self._project_dir / bootstrap.EXTRACT_FILE)
@@ -176,19 +181,19 @@ class Orchestrator:
 
     def _pedir_scope(self) -> None:
         print(
-            f"[sda] Proyecto nuevo inicializado.\n"
+            f"\n[sda] Proyecto nuevo inicializado.\n"
             f"      Edita {bootstrap.SCOPE_FILE} con las ideas de tu proyecto y,\n"
-            f"      cuando termines, escribe 'listo' aquí para continuar."
+            f"      cuando termines, escribe 'listo' aquí para continuar.\n"
         )
 
     def _presentar_borrador(self, resumen: str) -> None:
         print(
-            f"\n[sda] Borrador listo para tu revisión: {bootstrap.EXTRACT_FILE}\n"
-            f"----- resumen del onboarding-reader -----\n{resumen}\n"
-            f"-----------------------------------------\n"
+            f"\n[sda] Borrador listo para tu revisión: {bootstrap.EXTRACT_FILE}\n\n"
+            f"----- resumen del onboarding-reader -----\n\n{resumen}\n\n"
+            f"-----------------------------------------\n\n"
             f"      Revísalo en tu editor y responde:\n"
             f"        aprobar                 -> lo doy por bueno\n"
-            f"        rechazar <observación>  -> pido correcciones"
+            f"        rechazar <observación>  -> pido correcciones\n"
         )
 
     # --- Bucle externo (orquestador) -----------------------------------------
@@ -204,17 +209,17 @@ class Orchestrator:
             self._pedir_scope()
         elif st.current_phase == state.PHASE_HUMAN_REVIEW:
             print(
-                f"[sda] Hay un borrador esperando tu decisión: "
+                f"\n[sda] Hay un borrador esperando tu decisión: "
                 f"{bootstrap.EXTRACT_FILE}. Responde 'aprobar' o "
-                f"'rechazar <observación>'."
+                f"'rechazar <observación>'.\n"
             )
         elif st.current_phase == state.PHASE_READY_FOR_WORK:
-            print("[sda] Onboarding ya aprobado. Proyecto listo para trabajar.")
+            print("\n[sda] Onboarding ya aprobado. Proyecto listo para trabajar.\n")
 
         try:
             while True:
                 try:
-                    linea = (await prompt_line("tú> ")).strip()
+                    linea = (await prompt_line("[User] > ")).strip()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     break
@@ -267,8 +272,8 @@ class Orchestrator:
         if comando in {"aprobar", "aprobado", "approve"}:
             await self._aprobar()
             print(
-                f"[sda] Documento APROBADO. {bootstrap.EXTRACT_FILE} bloqueado.\n"
-                f"      Proyecto listo para la jornada de trabajo."
+                f"\n[sda] Documento APROBADO. {bootstrap.EXTRACT_FILE} bloqueado.\n"
+                f"      Proyecto listo para la jornada de trabajo.\n"
             )
             return True
 
