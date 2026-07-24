@@ -29,6 +29,10 @@
 - [D-023 — Áreas de descubrimiento §1–§10 adoptadas de una plantilla existente del usuario, regla "se cita, no se interpreta"](#d-023--áreas-de-descubrimiento-1–10-adoptadas-de-una-plantilla-existente-del-usuario-regla-se-cita-no-se-interpreta)
 - [D-024 — UX de mensajería en terminal: prefijos por hablante y espaciado entre bloques](#d-024--ux-de-mensajería-en-terminal-prefijos-por-hablante-y-espaciado-entre-bloques)
 - [D-025 — Fijar Sonnet + effort high para el onboarding-reader; diferir la sesión principal/líder (Opus + high) a T-027](#d-025--fijar-sonnet--effort-high-para-el-onboarding-reader-diferir-la-sesión-principalíder-opus--high-a-t-027)
+- [D-026 — El orchestrator-leader es un agente LLM bajo el principio "el LLM decide / las herramientas hacen cumplir"](#d-026--el-orchestrator-leader-es-un-agente-llm-bajo-el-principio-el-llm-decide--las-herramientas-hacen-cumplir)
+- [D-027 — El bucle interno se invoca vía herramienta en-proceso, no vía subagente nativo del SDK](#d-027--el-bucle-interno-se-invoca-vía-herramienta-en-proceso-no-vía-subagente-nativo-del-sdk)
+- [D-028 — La puerta de aprobación humana es un límite forzado por herramienta](#d-028--la-puerta-de-aprobación-humana-es-un-límite-forzado-por-herramienta)
+- [D-029 — La señal humana de "continuar" pasa a intención en lenguaje natural, validada por herramienta determinista](#d-029--la-señal-humana-de-continuar-pasa-a-intención-en-lenguaje-natural-validada-por-herramienta-determinista)
 
 ## Detalle
 
@@ -240,6 +244,34 @@ TripleS_Harness/
 **Razón:** hoy el bucle externo (`orchestrator.py::run`) es código Python puro que no abre ninguna sesión contra el LLM; la única sesión real es la interna del onboarding-reader, por lo que no hay todavía un lugar en el código donde cablear un modelo/effort para un "líder". Introducir esa sesión líder es un cambio de diseño mayor que merece su propio análisis antes de implementarse.
 **Alternativas consideradas:** implementar de una vez el líder Opus+high dentro del alcance de T-026; descartada por ampliar el alcance más allá de lo pedido y por requerir diseño previo (impacto en `orchestrator.py`, `repl.py`, costo/latencia de Opus persistente).
 **Impacto:** ref T-026 (implementada, mecanismo por-agente `model`/`effort` en `Provider.create_session`/`ClaudeSDKProvider` reutilizable), T-027 (análisis pendiente).
+
+### D-026 — El orchestrator-leader es un agente LLM bajo el principio "el LLM decide / las herramientas hacen cumplir"
+**Fecha:** 2026-07-24
+**Decisión:** el `orchestrator-leader` es un agente LLM (Opus + effort high) que lidera el bucle externo del harness, tomando la conversación con el humano y decidiendo qué hacer en cada momento. Los efectos peligrosos del flujo (cambios de estado en disco, adquisición de locks, cruce de la puerta de aprobación) no viven en el LLM: son efectos laterales deterministas de herramientas en-proceso que el líder solo puede invocar, nunca ejecutar directamente.
+**Razón:** reemplazar el bucle externo Python puro (`Orchestrator.run()`) por un agente conversacional real (pedido explícito del usuario, ver T-027) sin sacrificar el determinismo ni la seguridad que hoy garantiza el código: si el LLM "decide", las herramientas siguen siendo las únicas que "hacen cumplir" las reglas del harness.
+**Alternativas consideradas:** dejar el bucle externo como código Python puro indefinidamente (descartada por el pedido explícito del usuario de tener un líder conversacional); dar al líder acceso directo a editar el estado/archivos sin pasar por herramientas dedicadas (descartada por perder el control determinista que D-021/D-022 ya establecieron para el bucle interno).
+**Impacto:** ref T-027 (análisis), T-028 (implementación pendiente), `docs/design/T-027-orchestrator-leader.md`.
+
+### D-027 — El bucle interno se invoca vía herramienta en-proceso, no vía subagente nativo del SDK
+**Fecha:** 2026-07-24
+**Decisión:** el líder invoca el bucle interno del onboarding-reader mediante una herramienta en-proceso (`run_inner_loop`, `@tool` + `create_sdk_mcp_server`), no mediante un subagente nativo del SDK (`AgentDefinition`/Task).
+**Razón:** reconciliar "el bucle externo es un agente que lidera" (D-026) con la observabilidad turno a turno del bucle interno que ya exige D-021: una herramienta en-proceso es código Python propio del harness que puede conducir la segunda `Session` explícitamente e interceptar cada turno, tal como ya lo hacía `Orchestrator._conducir_onboarding`; un subagente nativo delegado ocultaría ese detalle. Verificado por el spike `spikes/t027_herramienta_en_proceso.py`: es seguro abrir/conducir un `ClaudeSDKClient` anidado desde dentro del callback de la herramienta del líder.
+**Alternativas consideradas:** subagente nativo vía `AgentDefinition` con observabilidad por `parent_tool_use_id` (descartada, mismo motivo que D-021: oculta el detalle turno a turno necesario para evaluar el bucle interno).
+**Impacto:** ref T-027, T-028 (`src/sda/tools/run_inner_loop`), D-021 (se mantiene vigente, ahora invocado desde una herramienta en vez de desde código de bucle externo puro).
+
+### D-028 — La puerta de aprobación humana es un límite forzado por herramienta
+**Fecha:** 2026-07-24
+**Decisión:** la promoción de un documento a `APPROVED` solo puede ocurrir mediante la herramienta `promote_to_approved`, y esa herramienta solo la ejecuta si `current_phase == HUMAN_REVIEW` y ya hubo un turno humano de por medio. El líder LLM no tiene ningún otro camino para marcar algo como aprobado.
+**Razón:** aun con un líder conversacional, la puerta de aprobación humana (requisito central de `idea.md`) no puede depender de que el LLM "decida bien"; debe seguir siendo un límite determinista que el código impone, igual que en el diseño Python puro actual (`Orchestrator._aprobar`).
+**Alternativas consideradas:** confiar en que el prompt del líder le indique no auto-aprobar sin instrucción humana (descartada: un prompt es una guía, no una garantía; el requisito de seguridad exige un límite en código).
+**Impacto:** ref T-027, T-028 (`src/sda/tools/promote_to_approved`).
+
+### D-029 — La señal humana de "continuar" pasa a intención en lenguaje natural, validada por herramienta determinista
+**Fecha:** 2026-07-24
+**Decisión:** con un líder conversacional, la señal humana para avanzar de bootstrap a onboarding deja de requerir la palabra exacta `listo`/`continuar` (D-022) y pasa a poder expresarse como intención en lenguaje natural dentro de la conversación con el líder; pero el avance real de fase sigue condicionado a que la herramienta determinista `scope_esta_lleno()` confirme que `scope.md` ya no es el stub vacío.
+**Razón:** un líder conversacional puede/debe interpretar lenguaje natural (es su valor agregado frente al comando exacto), pero la decisión de si el scope está realmente listo no puede depender de que el LLM "lo crea"; se conserva el espíritu de D-022 (una condición objetiva, no una heurística de archivo cambiado) mediante una herramienta explícita.
+**Alternativas consideradas:** mantener la palabra exacta también con el líder conversacional (descartada: contradice el valor de tener un líder que entienda lenguaje natural); dejar que el líder decida sin herramienta si el scope está listo (descartada: mismo riesgo que D-028, el LLM no debe ser el único juez de una condición que afecta el estado del harness).
+**Impacto:** ref T-027, T-028 (`src/sda/tools/scope_esta_lleno`), D-022 (matizada, no invalidada).
 
 <!--
 ### D-XXX — Título breve

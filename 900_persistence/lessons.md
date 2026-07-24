@@ -15,6 +15,7 @@
 - [L-009 — Un texto de terminal que se ve "pegado"/cortado puede ser el usuario tecleando encima, no un bug de truncamiento](#l-009--un-texto-de-terminal-que-se-ve-pegadocortado-puede-ser-el-usuario-tecleando-encima-no-un-bug-de-truncamiento)
 - [L-010 — `effort` del SDK funciona por sí solo, sin requerir `thinking` adaptive, y no se reporta de vuelta](#l-010--effort-del-sdk-funciona-por-sí-solo-sin-requerir-thinking-adaptive-y-no-se-reporta-de-vuelta)
 - [L-011 — El CLI usa un modelo auxiliar (Haiku) para tareas internas de infraestructura, independiente del modelo fijado por agente](#l-011--el-cli-usa-un-modelo-auxiliar-haiku-para-tareas-internas-de-infraestructura-independiente-del-modelo-fijado-por-agente)
+- [L-012 — El SDK soporta herramientas en-proceso que conviven con autenticación por suscripción y con una Session anidada](#l-012--el-sdk-soporta-herramientas-en-proceso-que-conviven-con-autenticación-por-suscripción-y-con-una-session-anidada)
 
 ## Detalle
 
@@ -83,6 +84,12 @@
 **Contexto:** durante la verificación en vivo de T-026 (`sda start` real, proyecto `sda_test_007`), se observó un uso mínimo de `claude-haiku-4-5` en la telemetría de la sesión, a pesar de haber fijado `model="sonnet"` para el onboarding-reader.
 **Lección:** el CLI de Claude Code invoca internamente un modelo auxiliar más económico (Haiku) para tareas de infraestructura propias del proceso (p. ej. resúmenes o gestión interna de tareas), separado del modelo que el harness fija explícitamente para el trabajo del agente. Ese uso de Haiku no es un error ni una fuga del modelo configurado.
 **Aplicación:** al revisar telemetría de uso/costo por modelo (relevante para T-023/T-011), no interpretar apariciones de un modelo distinto al fijado como una falla de configuración; distinguir entre el modelo del agente y el modelo auxiliar de infraestructura del CLI.
+
+### L-012 — El SDK soporta herramientas en-proceso que conviven con autenticación por suscripción y con una Session anidada
+**Fecha:** 2026-07-24
+**Contexto:** al ejecutar el spike `spikes/t027_herramienta_en_proceso.py` (ref T-027), se necesitaba confirmar si un líder LLM (Opus + effort high) podía invocar una herramienta implementada en Python que, a su vez, condujera una segunda `Session` completa del SDK (bucle interno, Sonnet + effort high) sin romper la autenticación por suscripción ni chocar con el `ClaudeSDKClient` del propio líder.
+**Lección:** el SDK (`claude_agent_sdk` 0.2.126) soporta herramientas en-proceso vía `@tool(name, desc, schema)` + `create_sdk_mcp_server("harness", tools=[...])`, registradas en `ClaudeAgentOptions(mcp_servers={"harness": server}, allowed_tools=["mcp__harness__<tool>"])` (el modelo las ve con el nombre `mcp__<server>__<tool>`). Es seguro que el callback Python de esa herramienta abra y conduzca un `ClaudeSDKClient` anidado (una segunda `Session` independiente) mientras la autenticación por suscripción sigue vigente (bajo `permission_mode="bypassPermissions"`, modo no interactivo) y sin conflicto de event loop ni de sesión con el líder que la invocó.
+**Aplicación:** esta es la base técnica que habilita D-026/D-027 (el orchestrator-leader como agente que invoca el bucle interno vía herramienta en-proceso) y, en general, cualquier agente futuro del doble bucle que necesite invocar sub-flujos deterministas o anidados desde una herramienta propia, en vez de delegarlos a un subagente nativo del SDK.
 
 <!--
 ### L-XXX — Título breve

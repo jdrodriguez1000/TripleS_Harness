@@ -38,7 +38,8 @@
 | T-024 | Implementar la primera rebanada vertical del doble bucle: máquina de estados en disco, bootstrap, bucle interno onboarding-reader y puerta de aprobación humana | Implementada |
 | T-025 | Prueba manual interactiva end-to-end de `sda start` (bootstrap → editar scope.md a mano → onboarding-reader → rechazar → aprobar) | Implementada |
 | T-026 | Fijar explícitamente modelo y esfuerzo de razonamiento del onboarding-reader (Sonnet + effort high) en vez del default implícito del CLI/SDK | Implementada |
-| T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | No implementada |
+| T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | Implementada |
+| T-028 | Implementar el rediseño de T-027: herramientas en-proceso, prompt del orchestrator-leader y refactor de orchestrator.py | No implementada |
 
 ## Detalle de tareas
 
@@ -241,7 +242,7 @@ Durante la verificación de T-025 se revisó el código (`src/sda/providers/clau
 Sin prioridad urgente; agrupada con las tareas de infraestructura pausadas.
 
 ### T-027 — Analizar el agente como sesión principal/líder que orqueste todo
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-24
 **Fecha actualización:** 2026-07-24
 
@@ -253,4 +254,21 @@ Pendiente de analizar (sin implementar aún):
 - Costo y latencia de tener Opus corriendo de forma persistente en el bucle externo.
 - Cómo se cablea Opus + high reutilizando el mecanismo por-agente que deja listo T-026.
 
-A analizar en una sesión futura antes de decidir su implementación.
+**Análisis y spike de verificación (2026-07-24, rama `t-027-sesion-lider`):** se creó la rama `t-027-sesion-lider` a partir de master (decisión del usuario, para descartarla sin tocar master si el enfoque no convence; el merge se decidirá en una sesión futura). Se escribió el documento de diseño `docs/design/T-027-orchestrator-leader.md` (carpeta `docs/design/` nueva), que resuelve el diseño pendiente: el `orchestrator-leader` (Opus + effort high) reemplaza el bucle externo de `Orchestrator.run()` bajo el principio "el LLM decide / las herramientas hacen cumplir"; los efectos peligrosos (estado en disco, lock, puerta de aprobación) quedan encapsulados como efectos laterales deterministas de herramientas en-proceso que el líder invoca, nunca como código que el líder ejecuta directamente. El documento cubre el flujo end-to-end, el contrato de las herramientas del líder, el impacto en el código existente, la generalización a agentes futuros (líder + herramientas como "chasis" reutilizable) y riesgos/trade-offs, además de las decisiones propuestas D-026 a D-029.
+
+Se diseñó y ejecutó en vivo el spike `spikes/t027_herramienta_en_proceso.py`, resultado VERDE: verificó de punta a punta (con un token aleatorio de control) que, bajo autenticación por suscripción y modo no interactivo (`permission_mode="bypassPermissions"`), un líder LLM (Opus + effort high) puede invocar una herramienta EN-PROCESO (`@tool` + `create_sdk_mcp_server` del SDK `claude_agent_sdk` 0.2.126) cuya implementación Python conduce una SEGUNDA `Session` (bucle interno, Sonnet + effort high) de forma observable turno a turno, y que el resultado regresa correctamente al líder. Hallazgo fino despejado: es seguro abrir y conducir un `ClaudeSDKClient` anidado desde dentro del callback de la herramienta del líder (no hay conflicto de event loop ni de sesión). API del SDK confirmada en el spike: `@tool(name, desc, schema)` + `create_sdk_mcp_server("harness", tools=[...])` + `ClaudeAgentOptions(mcp_servers={"harness": server}, allowed_tools=["mcp__harness__<tool>"])`; el nombre de la herramienta ante el modelo sigue el patrón `mcp__<server>__<tool>`.
+
+Con el análisis y el spike verificados, T-027 queda completa como tarea de diseño; la implementación del rediseño se traslada a la nueva T-028.
+
+### T-028 — Implementar el rediseño del orchestrator-leader (T-027)
+**Estado:** No implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+Tarea de implementación derivada de T-027, en la misma rama `t-027-sesion-lider`. Paso 2 de §10 del documento de diseño (`docs/design/T-027-orchestrator-leader.md`):
+- Crear `src/sda/tools/` con las herramientas en-proceso del líder: `run_inner_loop` (conduce el bucle interno onboarding-reader, moviendo la lógica hoy en `Orchestrator._conducir_onboarding`), `promote_to_approved` (única forma de llevar el documento a `APPROVED`, ver D-028) y `scope_esta_lleno` (valida determinísticamente si el humano ya llenó `scope.md`, ver D-029).
+- Crear `src/sda/prompts/orchestrator_leader.md` (system prompt del líder, Opus + effort high).
+- Refactorizar `src/sda/orchestrator.py`: mover `_conducir_onboarding` a la herramienta `run_inner_loop`; el bucle externo Python actual (`Orchestrator.run`) es reemplazado por una `Session` del líder que invoca las herramientas.
+- Posiblemente extender `Provider.create_session`/`ClaudeSDKProvider` (`src/sda/core/provider.py`, `src/sda/providers/claude_sdk.py`) para aceptar herramientas en-proceso (`mcp_servers`/`allowed_tools` con nombres `mcp__<server>__<tool>`), análogo a como T-026 extendió `model`/`effort`.
+
+Después de implementar: prueba end-to-end en vivo del flujo rediseñado (análoga a T-025, corrida real de `sda start` en terminal) y, si convence, merge de `t-027-sesion-lider` a master.
