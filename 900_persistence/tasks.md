@@ -24,12 +24,13 @@
 | T-010 | Definir si el soporte multi-vendor (Codex u otros) es restricción de v1 o meta futura | No implementada |
 | T-011 | Definir rúbrica del evaluador de calidad y origen del umbral 4.0 de idea.md | No implementada |
 | T-012 | Crear pyproject.toml del paquete sda (dependencias claude-agent-sdk, anyio; console script sda = sda.cli:main) | Implementada |
-| T-013 | Crear src/sda/cli.py con main() y sda --help funcional, más __main__.py | No implementada |
-| T-014 | Crear src/sda/core/provider.py (Provider ABC) y src/sda/core/session.py (Session ABC) | No implementada |
+| T-013 | Crear src/sda/cli.py con main() y sda --help funcional, más __main__.py | Implementada |
+| T-014 | Crear src/sda/core/provider.py (Provider ABC) y src/sda/core/session.py (Session ABC) | Implementada |
 | T-015 | Crear src/sda/providers/claude_sdk.py (ClaudeSDKProvider) con la política de autenticación por suscripción | No implementada |
 | T-016 | Spike: abrir sesión persistente sobre suscripción, confirmar respuesta y conservación de contexto entre turnos | No implementada |
 | T-017 | Spike: verificar descubrimiento de skills empaquetadas dentro de sda cuando el cwd es el proyecto destino | No implementada |
 | T-018 | Ampliar session-start-protocol para que lea documentos de contexto en la raíz del proyecto (p. ej. idea.md) | No implementada |
+| T-019 | Configurar .gitignore, protocolo obligatorio de commit/push en session-closer, e inicializar repo git conectado a GitHub | Implementada |
 
 ## Detalle de tareas
 
@@ -118,18 +119,18 @@ Hoy el harness usa Claude Code; a futuro se contempla Codex u otros. No se defin
 Configurado el paquete `sda`, con dependencias (`claude-agent-sdk`, `anyio`), console script `sda = "sda.cli:main"`, build backend `setuptools` con layout `src/`, y `requires-python = ">=3.12"`. Creados `pyproject.toml` y `src/sda/__init__.py`. Verificado en vivo: `pip install -e .` instala correctamente, `import sda` funciona, y el comando `sda.exe` queda registrado (fallará hasta T-013, cuando exista `sda.cli:main`). Ver D-013, D-014.
 
 ### T-013 — Crear src/sda/cli.py y __main__.py
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-23
-**Fecha actualización:** 2026-07-23
+**Fecha actualización:** 2026-07-24
 
-`src/sda/cli.py` con `main()` y un `sda --help` que funcione, más `__main__.py` para permitir `python -m sda` en desarrollo. Ver D-014.
+Creados `src/sda/cli.py` (parser con `argparse`: `build_parser()`, `main()`, `--version` vía `importlib.metadata.version("sda")`, y subcomando placeholder `start` que imprime "no implementado aún") y `src/sda/__main__.py` (habilita `python -m sda`). Verificado en vivo: `sda --help`, `sda --version` (→ `sda 0.1.0`), `sda start`, `python -m sda --help` y `sda` sin argumentos funcionan y terminan con código 0. Decisión de diseño: `argparse` (stdlib, sin dependencias nuevas) + esqueleto con subcomando placeholder (ver D-017). Ver D-014.
 
 ### T-014 — Crear core/provider.py y core/session.py
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-23
-**Fecha actualización:** 2026-07-23
+**Fecha actualización:** 2026-07-24
 
-`src/sda/core/provider.py` (`Provider` ABC, fábrica de sesiones) y `src/sda/core/session.py` (`Session` ABC, conversación multi-turno). Ver D-009, D-016.
+Creados `src/sda/core/__init__.py`, `src/sda/core/session.py` (`TurnResult` dataclass con campo `text`; `Session` ABC con `async send() -> TurnResult`, `async close()` y protocolo `async with` concreto vía `__aenter__`/`__aexit__`) y `src/sda/core/provider.py` (`Provider` ABC con `create_session(*, system_prompt=None) -> Session`). API asíncrona (el SDK `ClaudeSDKClient` es totalmente async; se verificó su interfaz en vivo). Verificado: imports OK, ambas ABCs lanzan `TypeError` al instanciarse directamente, una subclase de juguete ejecuta `send`→`TurnResult` y `async with` invoca `close`, y `core/` no importa `claude_agent_sdk` ni `sda.providers` (D-010, confirmado por grep: solo menciones en docstrings). Decisión de diseño registrada en D-018. Ver D-009, D-010, D-016.
 
 ### T-015 — Crear providers/claude_sdk.py
 **Estado:** No implementada
@@ -158,3 +159,10 @@ Spike de verificación de si el SDK descubre las skills empaquetadas dentro de `
 **Fecha actualización:** 2026-07-23
 
 Tarea pendiente derivada de L-002: el `session-start-protocol` solo lee `900_persistence/` y no documentos de contexto en la raíz del proyecto (p. ej. `idea.md`). Sigue vigente y sin corregir; se propone ampliarlo para evitar diagnósticos incorrectos al reanudar sesiones futuras.
+
+### T-019 — Configurar .gitignore, protocolo de commit/push en session-closer, e inicializar repo git
+**Estado:** Implementada
+**Fecha creación:** 2026-07-24
+**Fecha actualización:** 2026-07-24
+
+Se creó `.gitignore` en la raíz. Se actualizó la skill `.claude/skills/session-end-protocol/SKILL.md` con una sección obligatoria de "Commit y push obligatorios" al cierre de cada sesión, apuntando al remoto `https://github.com/jdrodriguez1000/TripleS_Harness.git` (`origin`). Se actualizó `.claude/agents/session-closer.md` dándole acceso a la herramienta Bash y añadiendo la confirmación de commit/push en su resumen final, con prohibición explícita de `git push --force` u operaciones destructivas. Se inicializó el repo git local (`git init`), se conectó `origin` (repo ya existía vacío en GitHub) y se hizo el primer commit y push a `master` (15 archivos).

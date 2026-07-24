@@ -3,8 +3,8 @@
 > Estado general del proyecto: qué se ha hecho y qué sigue.
 > Actualizar la fecha y el estado general cada vez que se registre un avance.
 
-**Última actualización:** 2026-07-23
-**Estado general:** Alcance y arquitectura del proyecto TripleS_Harness quedaron completamente acordados y verificados. El supuesto de mayor riesgo (autenticación por suscripción con el Agent SDK) quedó VERIFICADO en vivo, y la arquitectura Python fue CONFIRMADA explícitamente por el usuario. Se decidió continuar la construcción en este repo (no en el repo experimental previo `Harness_TripleS`, mucho más avanzado pero con un diseño desordenado). Quedaron acordadas reglas de diseño (un solo camino de proveedor, una sola cadena de abstracción, aislamiento del SDK en `providers/`) y la estructura completa de carpetas del paquete `sda`. Próximo paso: iniciar la construcción real del primer incremento (pyproject.toml, cli.py, core/, providers/claude_sdk.py y dos spikes de verificación).
+**Última actualización:** 2026-07-24
+**Estado general:** Arquitectura acordada y en construcción activa. El repo quedó conectado a GitHub (`origin`) con protocolo de commit/push obligatorio en cada cierre de sesión. Del primer incremento del paquete `sda` ya están implementadas la base de empaquetado (T-012), el CLI (T-013) y las ABCs del núcleo `Provider`/`Session` (T-014). Próximo paso: T-015, la primera implementación concreta (`ClaudeSDKProvider`) conectando con el SDK real bajo la política de autenticación por suscripción ya verificada.
 
 ## Índice
 
@@ -22,6 +22,8 @@ En la continuación de esta misma sesión, el usuario mostró un repositorio exp
 
 El usuario explicó que el desorden del repo anterior vino de mantener dos caminos vivos en paralelo (CLI y SDK; dos abstracciones de conversación) — ver L-003. De ahí se derivaron reglas de diseño acordadas: un solo camino de proveedor (el SDK, D-008), una sola cadena de abstracción `Provider`/`Session` (D-009), el SDK solo se importa dentro de `providers/` (D-010), `spikes/` fuera de `src/` con fecha de caducidad (D-011), y `tools/`/`agents/` sin conocerse mutuamente (D-012). Se acordó el nombre del paquete (`sda`, D-013), el punto de entrada (console script + `__main__.py`, D-014), la convención de código en inglés/español (D-015) y la estructura completa de carpetas (D-016). Queda un riesgo abierto sin verificar: si el SDK descubre las skills empaquetadas dentro de `sda` cuando el `cwd` es el proyecto destino (A-004), a resolver con un spike (T-017).
 
+En la sesión del 2026-07-24 se configuró el respaldo del proyecto en GitHub: `.gitignore`, sección obligatoria de commit/push en `session-end-protocol` y en el agente `session-closer` (con Bash habilitado y prohibición explícita de operaciones destructivas), `git init` local, conexión de `origin` (`https://github.com/jdrodriguez1000/TripleS_Harness.git`) y primer commit/push exitoso (T-019). Sobre esa base se construyeron tres piezas del primer incremento del paquete `sda`: T-012 (pyproject.toml, ya verificado en sesión previa), T-013 (`cli.py`/`__main__.py` con `argparse`, verificado en vivo por el propio usuario en una carpeta externa vía el comando `sda` instalado globalmente, ver D-017) y T-014 (`core/session.py` y `core/provider.py`, ABCs asíncronas `Session`/`Provider` con `TurnResult` como retorno de turno, ver D-018), verificadas ambas por instanciación fallida esperada de las ABCs, una subclase de juguete y grep confirmando el aislamiento del SDK (D-010).
+
 ## Hecho
 
 - 2026-07-23 | Carpeta `900_persistence/` creada con los 6 archivos base y estructura de índice (progress, tasks, lessons, decisions, assumptions, constraints) | ref: T-001, T-002
@@ -34,16 +36,17 @@ El usuario explicó que el desorden del repo anterior vino de mantener dos camin
 - 2026-07-23 | Verificada en vivo la autenticación por suscripción (no API key) con el Agent SDK, y verificado que un agente puede invocar otros agentes con observabilidad del loop interno | ref: T-009
 - 2026-07-23 | Decidido continuar la construcción en TripleS_Harness (no migrar al repo experimental Harness_TripleS) | ref: D-007
 - 2026-07-23 | Acordadas reglas de diseño (un solo camino SDK, una sola cadena Provider/Session, aislamiento del SDK en providers/, spikes/ con caducidad, tools/agents desacoplados) y arquitectura completa: nombre del paquete (sda), punto de entrada, convención de código, estructura de carpetas | ref: D-008 a D-016
+- 2026-07-23/24 | Creado pyproject.toml del paquete sda (dependencias, console script, layout src/), verificado con pip install -e . | ref: T-012
+- 2026-07-24 | Configurado .gitignore, protocolo obligatorio de commit/push en session-end-protocol y session-closer, repo git inicializado y conectado a GitHub (origin), primer commit/push exitoso | ref: T-019
+- 2026-07-24 | Creado src/sda/cli.py y __main__.py (argparse, --version, subcomando placeholder start), verificado en vivo por el usuario | ref: T-013, D-017
+- 2026-07-24 | Creadas las ABCs del núcleo core/session.py (Session, TurnResult) y core/provider.py (Provider), API asíncrona, aislamiento del SDK confirmado por grep | ref: T-014, D-018
 
 ## En progreso
 
-- Ninguna tarea de diseño/alineación en progreso; el alcance y la arquitectura quedaron acordados. Empieza la fase de construcción real del primer incremento | ref: T-012 a T-017
+- Construcción del primer incremento del paquete `sda`: quedan pendientes T-015 (ClaudeSDKProvider) y los dos spikes de verificación (T-016, T-017)
 
 ## Próximo
 
-- Crear `pyproject.toml` del paquete `sda` con dependencias y console script | ref: T-012
-- Crear `src/sda/cli.py` con `main()` y `__main__.py` | ref: T-013
-- Crear `core/provider.py` (Provider ABC) y `core/session.py` (Session ABC) | ref: T-014
 - Crear `providers/claude_sdk.py` (ClaudeSDKProvider) con la política de autenticación por suscripción | ref: T-015
 - Spike: sesión persistente sobre suscripción con contexto entre turnos | ref: T-016
 - Spike: verificación del descubrimiento de skills empaquetadas dentro de sda | ref: T-017

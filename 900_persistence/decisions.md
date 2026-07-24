@@ -20,6 +20,8 @@
 - [D-014 — Punto de entrada: console script sda.cli:main más __main__.py, sin main.py suelto](#d-014--punto-de-entrada-console-script-sdaclimain-más-__main__py-sin-mainpy-suelto)
 - [D-015 — Convención de código: identificadores/archivos en inglés, docstrings/comentarios en español](#d-015--convención-de-código-identificadoresarchivos-en-inglés-docstringscomentarios-en-español)
 - [D-016 — Estructura de carpetas del proyecto acordada](#d-016--estructura-de-carpetas-del-proyecto-acordada)
+- [D-017 — CLI con argparse (stdlib) y subcomando placeholder desde el esqueleto](#d-017--cli-con-argparse-stdlib-y-subcomando-placeholder-desde-el-esqueleto)
+- [D-018 — API asíncrona para Session/Provider y TurnResult como retorno del turno](#d-018--api-asíncrona-para-sessionprovider-y-turnresult-como-retorno-del-turno)
 
 ## Detalle
 
@@ -167,6 +169,20 @@ TripleS_Harness/
 **Razón:** materializar en carpetas concretas las decisiones D-008 a D-013.
 **Alternativas consideradas:** ninguna alternativa de estructura fue discutida en detalle; se acordó esta directamente.
 **Impacto:** ref T-012 a T-017 (tareas de construcción del primer incremento).
+
+### D-017 — CLI con argparse (stdlib) y subcomando placeholder desde el esqueleto
+**Fecha:** 2026-07-24
+**Decisión:** el CLI (`src/sda/cli.py`) se construye con `argparse` de la librería estándar, no con `click` ni otra librería de terceros. El esqueleto ya declara subcomandos (empezando por `start`) como placeholders que imprimen "no implementado aún" en vez de exponer solo `--help`/`--version` sin comandos. La versión se lee con `importlib.metadata.version("sda")` para no duplicar el número que ya vive en `pyproject.toml`.
+**Razón:** evitar una dependencia nueva coherente con el enfoque minimalista del proyecto; dejar listos los ganchos del flujo de `idea.md`/D-014 (`sda start`) para que T-014/T-015 solo conecten lógica sin rediseñar el CLI.
+**Alternativas consideradas:** usar `click` (descartada por añadir dependencia directa); CLI mínimo solo con `--help`/`--version` sin subcomandos (descartada por no reflejar el flujo previsto).
+**Impacto:** ref T-013. Los subcomandos se irán activando con lógica real en T-014 en adelante.
+
+### D-018 — API asíncrona para Session/Provider y TurnResult como retorno del turno
+**Fecha:** 2026-07-24
+**Decisión:** las ABCs del núcleo son asíncronas: `Session.send()` y `Session.close()` son `async`, y `Session` implementa el protocolo `async with` (`__aenter__`/`__aexit__` concretos en la ABC, con `__aexit__` llamando a `close()`). `Provider.create_session()` es sync (solo construye el objeto; la conexión real es async dentro de la sesión). Un turno (`send`) devuelve un `TurnResult` (dataclass en `core/session.py`) con al menos el campo `text`, extensible con metadata sin romper el contrato.
+**Razón:** el SDK subyacente (`claude_agent_sdk.ClaudeSDKClient`) es totalmente async (verificado en vivo: `connect`/`disconnect`/`query`/`receive_response` son `async`), y una sesión persistente con contexto entre turnos (spike T-016) requiere un cliente async de larga vida; esconder `anyio.run()` dentro de cada `send()` sync lo impediría. Un `TurnResult` (en vez de `str`) evita cambiar la firma del contrato cuando el evaluador del bucle interno necesite metadata (uso de tokens, mensajes crudos).
+**Alternativas consideradas:** API sync con `anyio.run()` escondido en cada `send()` (descartada: choca con la sesión persistente de T-016); que `send()` devuelva `str` simple (descartada: obligaría a romper el contrato al añadir observabilidad).
+**Impacto:** ref T-014. El puente sync→async (desde `cli.py::main`, que es sync) vivirá en `app.py` con `anyio.run(...)`, no en `core/`. T-015 implementará `send` sobre `client.query()` + `receive_response()` y `close` sobre `disconnect()`.
 
 <!--
 ### D-XXX — Título breve
