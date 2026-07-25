@@ -78,6 +78,7 @@ En una nueva sesión (2026-07-25, misma rama `t-027-sesion-lider`) se resolvió 
 - 2026-07-25 | Diseñada a nivel de análisis la memoria/persistencia del orchestrator-leader sobre el proyecto destino (no implementada) | ref: T-029
 - 2026-07-25 | Diagnosticado el entrelazado visual entre streaming y teclado del usuario en terminal; evaluadas 3 opciones sin decidir cuál implementar; bloqueado explícitamente el merge de `t-027-sesion-lider` a master hasta resolverlo | ref: T-030, D-033
 - 2026-07-25 | Resuelta e implementada T-030: migración de `input()` a `prompt_toolkit` (`TerminalUI`/`terminal_ui()` en `repl.py`, cola async de tecleo sin pérdida, `patch_stdout(raw=True)`); verificada con spike headless y en vivo por el usuario; bloqueo técnico de D-033 levantado | ref: T-030, D-033, D-034, L-014
+- 2026-07-25 | Incidente en prueba en vivo: HTTP 522 de Cloudflare contra `api.anthropic.com` (indisponibilidad temporal del proveedor, no del harness); dejó a la vista que el harness no tolera errores transitorios de la API — un 5xx propaga y mata la sesión viva del líder con todo su contexto. Registrado como T-031 | ref: T-031
 
 ## En progreso
 
@@ -87,6 +88,7 @@ En una nueva sesión (2026-07-25, misma rama `t-027-sesion-lider`) se resolvió 
 
 - Confirmar con el usuario si procede el merge de `t-027-sesion-lider` a master ahora que T-030 está resuelta (D-033 técnicamente levantado; puede seguir vigente el bloqueo de T-028, pospuesto por decisión del usuario) — NO fusionar sin confirmación explícita | ref: T-028, T-030, D-033
 - Diseñar en detalle el contrato de herramientas de memoria del orchestrator-leader sobre el proyecto destino (T-029): `record_decision`/`record_lesson`/`record_progress`, instrucciones de lectura al arrancar en `orchestrator_leader.md` | ref: T-029
+- Tolerar errores transitorios de la API (reintento con backoff en la capa del proveedor, respetando `retry_after`) para que un 5xx no mate la sesión viva del líder ni el contexto acumulado | ref: T-031
 - Borrar o promover `spikes/t027_herramienta_en_proceso.py` ahora que su mecanismo ya fue promovido a `src/` (D-011, candidato a limpieza en próxima sesión)
 - Investigar y diseñar la persistencia/reanudación de conversaciones del harness entre ejecuciones (pausada) | ref: T-020
 - Capturar uso de tokens y costo por turno en TurnResult (ResultMessage del SDK), base de observabilidad y de session_id para T-020 (pausada) | ref: T-023

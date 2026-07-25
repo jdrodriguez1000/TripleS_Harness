@@ -321,3 +321,24 @@ Tarea de diseño/fix surgida al probar en vivo los ajustes de UX de mensajería 
 **Iteraciones de UX descartadas durante la implementación:** (1) un prompt dinámico `(trabajando… lo que escribas se enviará al terminar) >` mientras el agente trabajaba — descartado por el usuario porque un prompt que se repinta queda escrito en el scrollback cada vez, ensuciando la transcripción; se eliminó junto con el context manager `ui.ocupado()` que lo alimentaba. (2) recuadrar el área de entrada con `show_frame=True` (imitando la UX de Claude Code) — implementado y verificado técnicamente, pero rechazado por el usuario tras probarlo en vivo ("no se ve muy bien") y revertido por completo; ver también L-014 (bug de `prompt_toolkit` descubierto durante esta prueba). Ver D-034.
 
 El bloqueo de D-033 queda **levantado** en lo técnico. El merge de `t-027-sesion-lider` a master sigue pendiente de confirmación explícita del usuario, porque el bloqueo de T-028 (merge pospuesto por decisión del usuario) puede seguir vigente.
+
+### T-031 — Tolerar errores transitorios de la API en las sesiones del harness
+**Estado:** No implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Tarea surgida de un incidente real durante una prueba de `sda start` (2026-07-25, justo después de cerrar T-030): la llamada a la API falló con un **HTTP 522 de Cloudflare** (`connection_timeout`, origen `api.anthropic.com`, `ray_id` a20bb5de8b05386d). El cuerpo del error venía marcado como `"retryable": true` con `"retry_after": 120`. No es un fallo del harness ni de los cambios de T-030 — es una indisponibilidad temporal del proveedor.
+
+**Hueco detectado:** el harness no maneja errores transitorios de la API. La excepción se propaga desde `sda/providers/claude_sdk.py::ClaudeSDKSession.send` y se lleva por delante el bucle del líder en `sda/orchestrator.py::Orchestrator.run`. Consecuencias:
+- Se pierde la sesión viva del líder y, con ella, todo el contexto conversacional acumulado (la sesión de larga vida es justo el mecanismo verificado en T-016 y sobre el que se apoya todo el doble bucle). El humano tiene que reanudar desde el estado en disco (`_harness_state.json`), que es mucho más pobre.
+- El turno perdido ya se estaba pagando. Como el líder es Opus con effort high (D-025/D-026), es el componente más caro por turno del sistema.
+- Afecta también al bucle interno (`run_inner_loop`, conducido por nuestro propio código, D-027), donde un fallo a mitad de la generación del borrador deja el trabajo del `onboarding-reader` a medias.
+
+**Dirección propuesta (sin diseñar en detalle todavía):** reintento con backoff exponencial en la capa del proveedor (`ClaudeSDKProvider`/`ClaudeSDKSession`), que es la frontera correcta: mantiene la lógica de resiliencia fuera del dominio y del orquestador, respetando la abstracción `Provider`. Puntos a resolver en el diseño:
+- Distinguir errores **reintentables** (5xx, timeouts de red, 429) de los **definitivos** (autenticación, petición inválida), para no reintentar en balde lo que nunca va a funcionar.
+- Respetar el `retry_after` que venga en el error cuando exista, en vez de imponer siempre nuestra propia cadencia.
+- Verificar primero **qué reintenta ya el Agent SDK por su cuenta**, para no duplicar backoff sobre backoff.
+- Decidir qué se le muestra al humano mientras se reintenta. Cuidado con la lección de T-030/D-034: nada que se repinte en el prompt, porque queda escrito en el scrollback. Si hace falta señal visible, la vía limpia es `bottom_toolbar` de `prompt_toolkit`.
+- Definir el comportamiento cuando se agotan los reintentos: idealmente **no** matar la sesión del líder, sino informar al humano y devolverle el control para que reintente el turno a mano, conservando el contexto.
+
+**Relación con otras tareas:** independiente de T-029 (memoria del líder en el proyecto destino), aunque ambas atacan la misma fragilidad de fondo — que hoy toda la memoria de trabajo vive en una sesión en RAM que un error puede borrar. También se relaciona con T-020 (persistir/reanudar conversaciones del SDK): si T-020 se retomara algún día, un fallo irrecuperable dejaría de ser tan costoso.
