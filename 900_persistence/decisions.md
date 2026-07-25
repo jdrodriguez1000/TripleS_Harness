@@ -37,6 +37,7 @@
 - [D-031 — El sandbox real por-agente se implementa con `builtin_tools` (`tools=` del SDK), no con `allowed_tools`](#d-031--el-sandbox-real-por-agente-se-implementa-con-builtin_tools-tools-del-sdk-no-con-allowed_tools)
 - [D-032 — El líder es el único interlocutor visible en terminal, con streaming real de texto](#d-032--el-líder-es-el-único-interlocutor-visible-en-terminal-con-streaming-real-de-texto)
 - [D-033 — El merge de `t-027-sesion-lider` a master queda bloqueado hasta resolver T-030](#d-033--el-merge-de-t-027-sesion-lider-a-master-queda-bloqueado-hasta-resolver-t-030)
+- [D-034 — El área de entrada del harness es un prompt en línea, fijo y mudo (sin recuadro ni indicadores de estado)](#d-034--el-área-de-entrada-del-harness-es-un-prompt-en-línea-fijo-y-mudo-sin-recuadro-ni-indicadores-de-estado)
 
 ## Detalle
 
@@ -304,6 +305,13 @@ TripleS_Harness/
 **Razón:** el streaming introducido en D-032 amplió la ventana de riesgo de que el tecleo del humano se entrelace visualmente con la salida del programa en terminal (ver diagnóstico en T-030); el usuario considera que ese problema de UX debe cerrarse antes de llevar esta rama a producción (master).
 **Alternativas consideradas:** hacer merge igual y arreglar T-030 después en master directamente (descartada explícitamente por el usuario).
 **Impacto:** ref T-028, T-030. Bloquea el ítem "evaluar y, si convence, hacer merge de `t-027-sesion-lider` a master" en `progress.md` con una condición adicional.
+
+### D-034 — El área de entrada del harness es un prompt en línea, fijo y mudo (sin recuadro ni indicadores de estado)
+**Fecha:** 2026-07-25
+**Decisión:** el área de entrada del humano en `sda start` (y en `run_repl`) es un prompt de `prompt_toolkit` en línea, con texto fijo (`"\n> "`) que nunca cambia ni se repinta con indicadores de estado ("trabajando…") ni recuadro (`show_frame`).
+**Razón:** durante la implementación de T-030 se probaron dos alternativas y ambas se descartaron: un prompt dinámico que mostraba "(trabajando…)" mientras el agente procesaba quedaba escrito en el scrollback de la terminal cada vez que se repintaba, ensuciando la transcripción de la conversación; y un recuadro (`show_frame=True`) imitando la UX de Claude Code, aunque funcionó técnicamente, fue rechazado por el usuario tras probarlo en vivo por preferencia visual ("no se ve muy bien"). Un prompt fijo y mudo evita ambos problemas sin sacrificar la robustez ya lograda (el tecleo del humano nunca se pierde ni se entrelaza visualmente, ver T-030).
+**Alternativas consideradas:** prompt dinámico con indicador de estado (descartada, ensucia el scrollback); recuadro del área de entrada con `show_frame=True` (descartada, preferencia visual del usuario tras verificarlo en vivo); `Application` de pantalla completa de `prompt_toolkit` con `HSplit`/`Frame` (descartada en el análisis previo por perder el scrollback nativo de la terminal y obligar a enrutar toda la salida a un buffer propio).
+**Impacto:** ref T-030 (`src/sda/repl.py::TerminalUI`). Si en el futuro hace falta una señal de "trabajando", la vía limpia sin ensuciar el scrollback es el `bottom_toolbar` de `prompt_toolkit`, que se borra automáticamente cuando el prompt retorna (no evaluado en código, solo identificado como la opción correcta a futuro).
 
 <!--
 ### D-XXX — Título breve

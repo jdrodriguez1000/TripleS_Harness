@@ -41,7 +41,7 @@
 | T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | Implementada |
 | T-028 | Implementar el rediseño de T-027: herramientas en-proceso, prompt del orchestrator-leader y refactor de orchestrator.py | Implementada |
 | T-029 | Diseñar memoria/persistencia del orchestrator-leader sobre el proyecto destino (avance, tareas, decisiones, lecciones) | No implementada |
-| T-030 | Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario en la terminal del orchestrator-leader | No implementada |
+| T-030 | Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario en la terminal del orchestrator-leader | Implementada |
 
 ## Detalle de tareas
 
@@ -299,7 +299,7 @@ Hallazgos de la conversación de análisis (2026-07-25), sin implementar aún:
 Pendiente explícito: diseñar en detalle el contrato de las nuevas herramientas de escritura, qué instrucciones exactas van al prompt del líder para la lectura al arrancar, y si conviene resumir/comprimir `_persistence/` en el mensaje de apertura en vez de dejar que el líder la lea bajo demanda con `Read`.
 
 ### T-030 — Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-25
 **Fecha actualización:** 2026-07-25
 
@@ -313,3 +313,11 @@ Tarea de diseño/fix surgida al probar en vivo los ajustes de UX de mensajería 
 3. **Recomendado:** reemplazar `input()` plano por una librería de edición de línea asíncrona (p. ej. `prompt_toolkit`) que mantenga un área de entrada separada del área de salida, de forma que lo tecleado nunca se mezcle visualmente con lo impreso, sin importar el momento. Requiere una dependencia nueva y algo de rediseño de `repl.py::prompt_line`/`orchestrator.py`, pero es la única opción que resuelve el problema de fondo en vez de mitigarlo.
 
 **Decisión del usuario (2026-07-25):** el merge de la rama `t-027-sesion-lider` a `master` queda **bloqueado explícitamente** hasta que esta tarea se resuelva — se suma como condición al bloqueo ya existente desde T-028 (pospuesto por decisión del usuario). No se ha decidido aún cuál opción implementar.
+
+**Implementación y verificación (2026-07-25, misma rama):** se implementó la opción 3 (recomendada): migración de `input()` a `prompt_toolkit`. En `src/sda/repl.py` se eliminaron `prompt_line()` (el `input()` delegado a un hilo con `anyio.to_thread.run_sync`) y el alias público `forzar_utf8()`; se creó la clase `TerminalUI` y el context manager async `terminal_ui(prompt)`: el `PromptSession` de `prompt_toolkit` se mantiene siempre abierto en una tarea de fondo (`_leer_en_bucle`) que encola cada línea tecleada en un memory object stream de anyio con buffer infinito; el bucle de conversación consume con `await ui.leer()` (devuelve `None` ante Ctrl+C/Ctrl+D, sin dejar la tarea de fondo colgada). Todo el bloque va envuelto en `patch_stdout(raw=True)` para que los `print()` se inserten sobre el área de entrada sin escapar los códigos ANSI tenues que ya usa `subagent_line()`. `run_repl()` se migró al mismo mecanismo. `src/sda/orchestrator.py` pasó a usar `terminal_ui("\n> ")`/`ui.leer()` en vez de `prompt_line()` (el `"\n"` conserva la línea en blanco de separación previa). Se agregó `prompt_toolkit` a `pyproject.toml` como dependencia explícita (ya estaba instalada de forma transitiva, 3.0.52). Verificación en dos niveles: (1) spike headless nuevo `spikes/t030_terminal_doble_area.py`, sin credenciales, con entrada simulada de `prompt_toolkit` — dos casos, ambos en verde: el humano teclea dos turnos durante el streaming sin perder ninguno y en orden; Ctrl+D devuelve `None` y cierra limpio; (2) verificación en vivo del usuario en terminal real (`sda start`), confirmando que la superposición desapareció.
+
+**Cambio de comportamiento:** escribir durante un turno del agente deja de ser un accidente visual y pasa a ser una acción soportada — el mensaje se encola y se procesa en orden cuando termina el turno en curso; nada se descarta.
+
+**Iteraciones de UX descartadas durante la implementación:** (1) un prompt dinámico `(trabajando… lo que escribas se enviará al terminar) >` mientras el agente trabajaba — descartado por el usuario porque un prompt que se repinta queda escrito en el scrollback cada vez, ensuciando la transcripción; se eliminó junto con el context manager `ui.ocupado()` que lo alimentaba. (2) recuadrar el área de entrada con `show_frame=True` (imitando la UX de Claude Code) — implementado y verificado técnicamente, pero rechazado por el usuario tras probarlo en vivo ("no se ve muy bien") y revertido por completo; ver también L-014 (bug de `prompt_toolkit` descubierto durante esta prueba). Ver D-034.
+
+El bloqueo de D-033 queda **levantado** en lo técnico. El merge de `t-027-sesion-lider` a master sigue pendiente de confirmación explícita del usuario, porque el bloqueo de T-028 (merge pospuesto por decisión del usuario) puede seguir vigente.

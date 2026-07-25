@@ -10,24 +10,19 @@ Recibe un ``Provider`` (no un proveedor concreto) para respetar la abstracción.
 
 from __future__ import annotations
 
+import math
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import anyio
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from sda.core.provider import Provider
 
 # Palabras que terminan la sesión (se comparan en minúsculas y sin espacios).
 _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
-
-
-async def prompt_line(prompt: str) -> str:
-    """Lee una línea del teclado sin bloquear el event loop.
-
-    ``input()`` es bloqueante: se corre en un hilo para no congelar el bucle
-    asíncrono de la(s) sesión(es). Utilidad compartida por el REPL simple y por el
-    orquestador del doble bucle.
-    """
-    return await anyio.to_thread.run_sync(input, prompt)
 
 
 # Tenue (dim) en vez de un color fijo: se adapta al esquema de la terminal
@@ -48,11 +43,6 @@ def subagent_line(nombre: str, texto: str) -> str:
     return f"\n  {_DIM}⎿ [{nombre}] {texto}{_RESET}"
 
 
-def forzar_utf8() -> None:
-    """Reconfigura la consola a UTF-8 (ver ``_forzar_utf8``). Alias público."""
-    _forzar_utf8()
-
-
 def _forzar_utf8() -> None:
     """Reconfigura la consola a UTF-8 para no romper con acentos ni emojis.
 
@@ -67,21 +57,84 @@ def _forzar_utf8() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
+class TerminalUI:
+    """Terminal con área de entrada fija abajo y área de salida encima (T-030).
+
+    Con ``input()`` plano, el eco del teclado y los ``print()`` del streaming del
+    agente comparten el mismo cursor: si el humano escribe mientras el modelo emite
+    texto, ambos flujos se entrelazan visualmente (no se corrompe nada, pero se lee
+    fatal). ``prompt_toolkit`` resuelve eso repintando: la línea que el humano teclea
+    vive siempre al pie de la terminal y la salida se inserta *encima* de ella.
+
+    Para que ese repintado exista también mientras el agente trabaja, el prompt se
+    mantiene **siempre abierto** en una tarea de fondo que empuja cada línea a una
+    cola. El bucle de conversación consume de la cola con :meth:`leer`, así que lo
+    que el humano escriba durante un turno no se pierde ni se mezcla: queda encolado
+    y se procesa cuando el turno en curso termina.
+
+    El prompt es fijo y mudo a propósito: un texto que cambie según el estado (un
+    "trabajando…") se queda escrito en el historial de la terminal cada vez que se
+    repinta, y ensucia la transcripción de la conversación.
+    """
+
+    def __init__(self, prompt: str) -> None:
+        self._session: PromptSession[str] = PromptSession(prompt)
+        # Buffer infinito: encolar nunca debe bloquear al humano que escribe.
+        self._envio, self._recepcion = anyio.create_memory_object_stream[str | None](
+            max_buffer_size=math.inf
+        )
+
+    async def leer(self) -> str | None:
+        """Devuelve la siguiente línea del humano, o ``None`` si pidió terminar.
+
+        ``None`` corresponde a Ctrl+C / Ctrl+D (fin de la entrada), no a una línea
+        vacía: una línea vacía se devuelve tal cual y la decide quien llama.
+        """
+        return await self._recepcion.receive()
+
+    async def _leer_en_bucle(self) -> None:
+        """Mantiene el prompt abierto sin pausa y encola cada línea que el humano envía."""
+        while True:
+            try:
+                linea = await self._session.prompt_async()
+            except (EOFError, KeyboardInterrupt):
+                await self._envio.send(None)
+                return
+            await self._envio.send(linea)
+
+
+@asynccontextmanager
+async def terminal_ui(prompt: str) -> AsyncIterator[TerminalUI]:
+    """Abre la terminal de doble área y la cierra al salir del bloque.
+
+    ``patch_stdout`` redirige ``print()`` (el nuestro y el de cualquier dependencia)
+    para que se dibuje encima del área de entrada en vez de pisarla. ``raw=True``
+    deja pasar las secuencias ANSI que ya usamos —el tono tenue de
+    :func:`subagent_line`— en vez de escaparlas como texto literal.
+    """
+    _forzar_utf8()
+    ui = TerminalUI(prompt)
+    with patch_stdout(raw=True):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(ui._leer_en_bucle)
+            try:
+                yield ui
+            finally:
+                # El prompt de fondo no termina solo: se cancela al cerrar el bloque.
+                tg.cancel_scope.cancel()
+
+
 async def run_repl(provider: Provider) -> int:
     """Abre una sesión y conversa por teclado hasta que el humano termine.
 
     Devuelve el código de salida (``0`` en una terminación normal).
     """
-    _forzar_utf8()
     print("[sda] sesión interactiva — escribe 'salir' para terminar")
 
-    async with provider.create_session() as session:
+    async with provider.create_session() as session, terminal_ui("[User] > ") as ui:
         while True:
-            try:
-                linea = await prompt_line("[User] > ")
-            except (EOFError, KeyboardInterrupt):
-                # Ctrl+Z/Ctrl+D o Ctrl+C: salir limpiamente con un salto de línea.
-                print()
+            linea = await ui.leer()
+            if linea is None:
                 break
 
             linea = linea.strip()

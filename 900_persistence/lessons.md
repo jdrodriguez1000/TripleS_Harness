@@ -17,6 +17,7 @@
 - [L-011 — El CLI usa un modelo auxiliar (Haiku) para tareas internas de infraestructura, independiente del modelo fijado por agente](#l-011--el-cli-usa-un-modelo-auxiliar-haiku-para-tareas-internas-de-infraestructura-independiente-del-modelo-fijado-por-agente)
 - [L-012 — El SDK soporta herramientas en-proceso que conviven con autenticación por suscripción y con una Session anidada](#l-012--el-sdk-soporta-herramientas-en-proceso-que-conviven-con-autenticación-por-suscripción-y-con-una-session-anidada)
 - [L-013 — `allowed_tools` no restringe el toolset bajo `bypassPermissions`: solo auto-aprueba](#l-013--allowed_tools-no-restringe-el-toolset-bajo-bypasspermissions-solo-auto-aprueba)
+- [L-014 — `PromptSession.prompt_async()` de prompt_toolkit 3.0.52 pisa `show_frame` con `False` en cada llamada](#l-014--promptsessionprompt_async-de-prompt_toolkit-3052-pisa-show_frame-con-false-en-cada-llamada)
 
 ## Detalle
 
@@ -97,6 +98,12 @@
 **Contexto:** al probar T-028 (orchestrator-leader) en una carpeta de proyecto real, el usuario notó que las citas de línea del líder parecían provenir de un acceso de lectura sin restricción, pese a que el diseño asumía (desde T-024/D-026) que `allowed_tools` limitaba qué herramientas nativas tenía cada agente.
 **Lección:** bajo `permission_mode="bypassPermissions"`, `allowed_tools` de `ClaudeAgentOptions` NO restringe el conjunto de herramientas disponibles; solo evita el prompt de confirmación de permiso para las herramientas listadas (las auto-aprueba). El agente conserva acceso al toolset nativo completo (Read, Write, Edit, Bash, etc.) esté o no en `allowed_tools`. Confirmado contra documentación oficial del SDK `claude-agent-sdk` y con una prueba en vivo: una sesión con `tools=["Glob"]` (no `allowed_tools`) sí quedó incapaz de leer archivos. El mecanismo real de restricción es `tools=` (allowlist de herramientas nativas base) o `disallowed_tools=` (denylist).
 **Aplicación:** para cualquier sandbox real por-agente en este proyecto, usar `builtin_tools` (nuevo parámetro de `Provider.create_session`, mapea a `tools=`) o `disallowed_tools`, nunca `allowed_tools` como mecanismo de seguridad. Revisar cualquier afirmación previa de "sandbox" basada solo en `allowed_tools` (p. ej. T-024) como nominal hasta que se confirme con `tools=`/`disallowed_tools=`. Ver D-031.
+
+### L-014 — `PromptSession.prompt_async()` de prompt_toolkit 3.0.52 pisa `show_frame` con `False` en cada llamada
+**Fecha:** 2026-07-25
+**Contexto:** al probar (y luego revertir) la opción de recuadrar el área de entrada con `show_frame=True` durante la implementación de T-030, el marco no aparecía en pantalla pese a pasarlo al constructor de `PromptSession`.
+**Lección:** `PromptSession.prompt_async()` declara el parámetro `show_frame: FilterOrBool = False` (en vez de `= None`, como sí hace `prompt()` síncrono). Como el cuerpo del método ejecuta `if show_frame is not None: self.show_frame = show_frame`, cada llamada a `prompt_async()` sobrescribe con `False` el valor dado al construir la sesión, sin importar qué se haya configurado antes. Se descubrió renderizando el layout a un `Screen` manualmente, porque la captura del `Vt100_Output` no mostraba el marco.
+**Aplicación:** si en el futuro se necesita usar `show_frame` (u otro parámetro con esta misma asimetría entre `prompt()` y `prompt_async()`) en un flujo async, hay que pasarlo explícitamente en cada llamada a `prompt_async(...)`, no confiar en el valor fijado al construir `PromptSession`.
 
 <!--
 ### L-XXX — Título breve

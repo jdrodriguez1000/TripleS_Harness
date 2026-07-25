@@ -22,7 +22,7 @@ from pathlib import Path
 
 from sda import bootstrap, state
 from sda.core.provider import Provider
-from sda.repl import forzar_utf8, prompt_line
+from sda.repl import terminal_ui
 from sda.resources import load_prompt
 from sda.tools import LeaderTools
 
@@ -85,7 +85,6 @@ class Orchestrator:
 
     async def run(self) -> int:
         """Ejecuta el bucle externo hasta que el humano salga. Devuelve el exit code."""
-        forzar_utf8()
         recien_creado = bootstrap.bootstrap(self._project_dir)
         st = state.load(self._project_dir)
 
@@ -107,26 +106,33 @@ class Orchestrator:
             línea va SIEMPRE antes del bloque (nunca después), para que cada
             elemento —entrada del humano, narración, estado del subagente, prompt—
             quede separado por exactamente una línea en blanco, sin duplicados.
+
+            ``print`` está intervenido por ``terminal_ui``: el texto se inserta encima
+            del área de entrada, sin pisar lo que el humano esté tecleando (T-030).
             """
             print(f"\n{texto}")
 
         try:
-            # El líder abre saludando, orientado por el estado actual del proyecto.
-            # Es el único interlocutor del humano, así que su texto no lleva etiqueta.
-            await leader.send(_mensaje_apertura(st, recien_creado), on_text=_mostrar)
+            # El prompt lleva un salto de línea delante para que quede separado del
+            # bloque anterior por exactamente una línea en blanco, igual que el resto
+            # de elementos de la conversación (ver ``_mostrar``).
+            async with terminal_ui("\n> ") as ui:
+                # El líder abre saludando, orientado por el estado actual del proyecto.
+                # Es el único interlocutor del humano, así que su texto no lleva etiqueta.
+                await leader.send(_mensaje_apertura(st, recien_creado), on_text=_mostrar)
 
-            while True:
-                try:
-                    linea = (await prompt_line("\n> ")).strip()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    break
-                if not linea:
-                    continue
-                if linea.lower() in _COMANDOS_SALIDA:
-                    break
+                while True:
+                    linea = await ui.leer()
+                    if linea is None:
+                        # Ctrl+C / Ctrl+D: fin de la entrada, se cierra la sesión.
+                        break
+                    linea = linea.strip()
+                    if not linea:
+                        continue
+                    if linea.lower() in _COMANDOS_SALIDA:
+                        break
 
-                await leader.send(linea, on_text=_mostrar)
+                    await leader.send(linea, on_text=_mostrar)
         finally:
             await self._tools.cerrar()
             await leader.close()

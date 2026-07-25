@@ -9,6 +9,9 @@ requires-python = ">=3.12"
 dependencies = [
     "claude-agent-sdk",
     "anyio",
+    # Terminal de doble área (entrada fija abajo, salida encima): evita que el eco
+    # del teclado se entrelace con el streaming del agente (T-030).
+    "prompt_toolkit",
 ]
 
 [project.scripts]
