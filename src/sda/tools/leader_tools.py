@@ -25,7 +25,7 @@ from sda.core.provider import Provider
 from sda.core.session import Session
 from sda.core.tool import InProcessTool
 from sda.evaluator import evaluate_draft
-from sda.repl import subagent_line
+from sda.repl import Indicador, indicador_mudo, subagent_line
 from sda.resources import load_prompt
 
 # Sandbox DURO del onboarding-reader (vía ``builtin_tools`` → ``tools`` del SDK):
@@ -44,6 +44,25 @@ _INSTRUCCION_INICIAL = (
     "_templates/document-extract-temp.md y cualquier otro documento del "
     "proyecto, y escribe _prototype/document-extract.md instanciando la "
     "plantilla. Al terminar, responde con tu resumen ejecutivo."
+)
+
+# Corrección con la sesión interna viva: el borrador está en su contexto.
+_INSTRUCCION_CORRECCION = (
+    "El humano pide ajustes sobre el borrador actual: {feedback}\n"
+    "Ajusta SOLO lo señalado en _prototype/document-extract.md y "
+    "responde con tu resumen ejecutivo actualizado."
+)
+
+# Corrección con la sesión interna recién abierta (T-033): tras un reinicio del
+# proceso el borrador sigue en disco pero NO en el contexto del subagente, que
+# nace vacío. Hay que mandarlo a leerlo antes de tocar nada; si no, "ajusta el
+# borrador actual" no significa nada para él.
+_INSTRUCCION_CORRECCION_SIN_CONTEXTO = (
+    "Retomamos un trabajo previo: _prototype/document-extract.md ya existe en "
+    "disco, pero NO está en tu contexto porque esta sesión acaba de empezar. "
+    "Léelo primero (y _context/scope.md si te hace falta) antes de tocar nada.\n"
+    "El humano pide ajustes sobre ese borrador: {feedback}\n"
+    "Ajusta SOLO lo señalado y responde con tu resumen ejecutivo actualizado."
 )
 
 
@@ -115,6 +134,18 @@ class LeaderTools:
         self._provider = provider
         self._project_dir = project_dir
         self._inner: Session | None = None
+        # Mudo por defecto: fuera de la terminal (spikes, tests) no hay barra que
+        # animar. El orquestador lo sustituye por el de la ``TerminalUI`` real.
+        self._indicador: Indicador = indicador_mudo
+
+    def usar_indicador(self, indicador: Indicador) -> None:
+        """Conecta el indicador de trabajo en curso de la terminal.
+
+        Se inyecta en vez de recibir la ``TerminalUI`` entera porque estas herramientas
+        no deben saber nada de cómo se dibuja: solo necesitan poder decir "esto está
+        tardando y sigue vivo".
+        """
+        self._indicador = indicador
 
     # --- Registro de herramientas -------------------------------------------
 
@@ -135,8 +166,9 @@ class LeaderTools:
                 description=(
                     "Lanza y conduce el bucle interno (el onboarding-reader) para "
                     "producir o corregir _prototype/document-extract.md. Pásale una "
-                    "'instruction' breve: en la primera vez basta un aviso de "
-                    "arranque; en un rechazo, el feedback exacto del humano. Devuelve "
+                    "'instruction' breve: en el arranque basta un aviso; si ya hay un "
+                    "borrador en revisión, el feedback exacto del humano (obligatorio: "
+                    "sin él la llamada se rechaza). Devuelve "
                     "el resumen ejecutivo del onboarding-reader y deja el borrador "
                     "listo para revisión humana."
                 ),
@@ -198,22 +230,50 @@ class LeaderTools:
         ``HUMAN_REVIEW``. Devuelve al líder el resumen ejecutivo del reader.
         """
         instruccion_humano = (args.get("instruction") or "").strip()
-        primera_vez = self._inner is None
+
+        # Si esto es un arranque o una corrección se decide por el ESTADO EN DISCO,
+        # no por el objeto en memoria (T-033): tras un reinicio ``self._inner``
+        # siempre es None, pero si la fase persistida es HUMAN_REVIEW ya hay un
+        # borrador esperando al humano y esta llamada es, necesariamente, una
+        # corrección. Inferirlo de la memoria del proceso hacía que la primera
+        # corrección tras un reinicio se descartara en silencio.
+        st = state.load(self._project_dir)
+        es_correccion = st.current_phase == state.PHASE_HUMAN_REVIEW
+        if es_correccion and not instruccion_humano:
+            return (
+                "RECHAZADO: ya hay un borrador en revisión humana, así que esta "
+                "llamada es una corrección y necesita el feedback del humano en "
+                "'instruction'. Pregúntale qué quiere corregir y vuelve a llamarme "
+                "con su respuesta literal."
+            )
+
+        # Solo importa para el texto del turno: distingue la corrección "en caliente"
+        # (el borrador está en el contexto del subagente) de la que llega con la
+        # sesión interna recién abierta tras un reinicio.
+        sesion_fresca = self._inner is None
         await self._abrir_onboarding()
 
-        if primera_vez:
+        if not es_correccion:
             turno = _INSTRUCCION_INICIAL
-        else:
-            turno = (
-                "El humano pide ajustes sobre el borrador actual: "
-                f"{instruccion_humano}\n"
-                "Ajusta SOLO lo señalado en _prototype/document-extract.md y "
-                "responde con tu resumen ejecutivo actualizado."
+        elif sesion_fresca:
+            turno = _INSTRUCCION_CORRECCION_SIN_CONTEXTO.format(
+                feedback=instruccion_humano
             )
-        return await self._conducir_onboarding(turno)
+        else:
+            turno = _INSTRUCCION_CORRECCION.format(feedback=instruccion_humano)
+        return await self._conducir_onboarding(turno, es_correccion=es_correccion)
 
-    async def _conducir_onboarding(self, instruccion: str) -> str:
-        """Manda un turno al onboarding-reader y devuelve su resumen (texto)."""
+    async def _conducir_onboarding(
+        self, instruccion: str, *, es_correccion: bool
+    ) -> str:
+        """Manda un turno al onboarding-reader y devuelve su resumen (texto).
+
+        ``es_correccion`` no cambia lo que se hace, solo **cómo se cuenta**: sobre un
+        borrador que ya existe el subagente actualiza, no construye. Se recibe como
+        parámetro porque aquí abajo ya no se puede distinguir —a la fase en disco se
+        le acaba de escribir ``ONBOARDING`` en ambos casos— y anunciar siempre
+        "construcción" le mentía al humano en cada ciclo de corrección.
+        """
         assert self._inner is not None
         st = state.load(self._project_dir)
         st.active_repl = state.REPL_INTERNAL
@@ -222,23 +282,30 @@ class LeaderTools:
         st.current_phase = state.PHASE_ONBOARDING
         state.save(self._project_dir, st)
 
+        gerundio = "Actualizando" if es_correccion else "Construyendo"
+        participio = "actualizado" if es_correccion else "construido"
+
+        # El aviso de "estoy trabajando" vive en la barra inferior y desaparece al
+        # terminar; en el historial solo queda el resultado, una línea por ciclo.
+        with self._indicador(
+            f"[onboarding-reader] {gerundio} {bootstrap.EXTRACT_FILE}…"
+        ):
+            resultado = await self._inner.send(instruccion)
         print(
             subagent_line(
-                "onboarding-reader",
-                f"Trabajando en la construcción de {bootstrap.EXTRACT_FILE}. "
-                "Te aviso cuando termine…",
+                "onboarding-reader", f"Borrador {participio}: {bootstrap.EXTRACT_FILE}"
             )
         )
-        resultado = await self._inner.send(instruccion)
-        print(subagent_line("onboarding-reader", "Trabajo terminado."))
 
         # El entregable ya está en disco; se somete a la eval interna (stub por ahora).
         evaluacion = evaluate_draft(self._project_dir / bootstrap.EXTRACT_FILE)
         if not evaluacion.passed and evaluacion.feedback:
             # Cuando la eval real exista, aquí se re-conduce al subagente sin
             # molestar al humano. Con el stub actual esta rama no se toma.
+            # Es una corrección: el borrador ya está escrito y solo se retoca.
             return await self._conducir_onboarding(
-                f"La auditoría interna pide corregir: {evaluacion.feedback}"
+                f"La auditoría interna pide corregir: {evaluacion.feedback}",
+                es_correccion=True,
             )
 
         # Borrador listo para el humano.

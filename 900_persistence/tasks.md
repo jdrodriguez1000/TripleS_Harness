@@ -44,9 +44,10 @@
 | T-030 | Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario en la terminal del orchestrator-leader | Implementada |
 | T-031 | Tolerar errores transitorios de la API en las sesiones del harness | No implementada |
 | T-032 | Definir identidad, tono y reglas invariantes del orchestrator-leader (system prompt reestructurado) | Implementada |
-| T-033 | Defecto: tras un reinicio, la primera corrección del humano se descarta y el borrador se regenera desde cero | No implementada |
-| T-034 | Defecto: un apagón durante el bucle interno deja al líder creyendo que el proyecto es nuevo (transaction_lock sin lector) | No implementada |
+| T-033 | Defecto: tras un reinicio, la primera corrección del humano se descarta y el borrador se regenera desde cero | Implementada |
+| T-034 | Defecto: un apagón durante el bucle interno deja al líder creyendo que el proyecto es nuevo (transaction_lock sin lector) | Implementada |
 | T-035 | Diseñar un protocolo de cierre de sesión para el producto `sda` (equivalente a session-end-protocol, sobre `_persistence/`) | No implementada |
+| T-036 | Indicador animado de trabajo en curso y verbo honesto (construcción vs. actualización) en los avisos del subagente | Implementada |
 
 ## Detalle de tareas
 
@@ -381,9 +382,9 @@ Decisiones tomadas dentro de esta tarea:
 Verificación: no tiene verificación automatizada propia (es texto de prompt); su efecto se prueba junto con T-029 en la verificación en vivo pendiente para la próxima sesión.
 
 ### T-033 — Defecto: tras un reinicio, la primera corrección del humano se descarta y el borrador se regenera desde cero
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-25
-**Fecha actualización:** 2026-07-25
+**Fecha actualización:** 2026-07-25 (resuelta en sesión posterior, misma fecha calendario)
 
 Defecto real detectado y VERIFICADO ejecutando código (no es una suposición), anterior a esta sesión (viene de T-028), no introducido por T-029. Surgió al explicarle al usuario el flujo end-to-end y qué pasa ante un apagón del proceso.
 
@@ -395,10 +396,12 @@ Defecto real detectado y VERIFICADO ejecutando código (no es una suposición), 
 
 **Relación:** causa raíz asociada a C-005 (la conversación vive solo en memoria del proceso). Es el más urgente de los dos defectos (T-033/T-034) por ser silencioso: no hay ningún error ni aviso, el humano simplemente recibe un resultado equivocado.
 
+**Implementación y verificación (sesión posterior, 2026-07-25, misma rama `t-027-sesion-lider`):** `_tool_run_inner_loop` (`src/sda/tools/leader_tools.py`) fue corregido para decidir arranque vs. corrección leyendo el ESTADO EN DISCO (`state.current_phase == PHASE_HUMAN_REVIEW`) en vez de `self._inner is None`. Se agregó `_INSTRUCCION_CORRECCION_SIN_CONTEXTO`: cuando la sesión interna en memoria está vacía pero la fase en disco indica corrección, se le ordena al subagente leer primero el borrador existente en disco antes de tocarlo (no está en su contexto tras el reinicio). Se agregó también un rechazo determinista en Python cuando se detecta corrección sin feedback en `instruction`. Verificado por el usuario en vivo con `sda start` real y con el spike nuevo `spikes/t033_t034_recuperacion_reinicio.py` (verde).
+
 ### T-034 — Defecto: un apagón durante el bucle interno deja al líder creyendo que el proyecto es nuevo
-**Estado:** No implementada
+**Estado:** Implementada
 **Fecha creación:** 2026-07-25
-**Fecha actualización:** 2026-07-25
+**Fecha actualización:** 2026-07-25 (resuelta en sesión posterior, misma fecha calendario)
 
 Defecto real detectado y VERIFICADO con grep (no es una suposición), anterior a esta sesión (viene de T-028), no introducido por T-029. Surgió en la misma conversación que T-033, al analizar qué pasa ante un apagón durante el bucle interno (no en la puerta de revisión, sino mientras el onboarding-reader todavía está generando el borrador).
 
@@ -410,6 +413,8 @@ Defecto real detectado y VERIFICADO con grep (no es una suposición), anterior a
 
 **Relación:** comparte causa de fondo con T-033 (recuperación de estado incompleta tras un apagón) pero es un caso distinto (interrupción durante el bucle interno, no durante la revisión humana). Registrado como lección L-015. El usuario decidió explícitamente NO arreglar T-033 ni T-034 en esta sesión, solo registrarlos como tareas.
 
+**Implementación y verificación (sesión posterior, 2026-07-25, misma rama `t-027-sesion-lider`):** nueva función `_recuperar_transaccion(project_dir, st)` en `src/sda/orchestrator.py`, invocada al arrancar: detecta el lock huérfano en disco, lo salda (`transaction_lock` a `False`, `active_repl` a `EXTERNAL`, `active_subagent` a `None`) SIN tocar la fase, y devuelve un booleano `interrumpido` que `_instruccion_apertura()` usa para dar al líder un mensaje de "sesión interrumpida" en vez del mensaje de proyecto nuevo. Verificado por el usuario en vivo con `sda start` real y con el mismo spike `spikes/t033_t034_recuperacion_reinicio.py` (verde).
+
 ### T-035 — Diseñar un protocolo de cierre de sesión para el producto `sda`
 **Estado:** No implementada
 **Fecha creación:** 2026-07-25
@@ -420,3 +425,19 @@ Tarea dejada explícitamente fuera de alcance por el usuario al acordar el alcan
 En este repo (`TripleS_Harness`), `900_persistence/` se mantiene al día porque el cierre de sesión es un protocolo obligatorio, ejecutado por un agente dedicado (`session-closer`). El producto `sda` no tiene ningún equivalente: la bitácora en `_persistence/` del proyecto destino (T-029) depende enteramente de que el `orchestrator-leader` decida registrar cosas DURANTE la conversación, por su propio criterio. Hoy solo hay UN apunte automático garantizado en todo el flujo (la línea de progreso que escribe `promote_to_approved` al aprobar el onboarding, ver `leader_tools.py::_sincronizar_persistencia`); todo lo demás depende del criterio del modelo en cada turno, sin ningún cierre forzado.
 
 Pendiente de diseñar: si conviene un comando explícito de cierre (análogo a `aprobar`/`rechazar`) que dispare una consolidación final de la memoria antes de salir, o alguna otra forma de garantizar que la sesión no termine sin dejar registro de lo ocurrido.
+
+### T-036 — Indicador animado de trabajo en curso y verbo honesto (construcción vs. actualización) en los avisos del subagente
+**Estado:** Implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Tarea nueva surgida de dos observaciones del usuario sobre el aviso del onboarding-reader en terminal: (a) el mensaje era estático, sin sensación de progreso; (b) en una corrección seguía diciendo "construcción" cuando en realidad estaba actualizando un borrador ya existente. Nota: el código T-035 ya estaba ocupado en este archivo (protocolo de cierre para `sda`), por eso esta tarea nueva quedó numerada T-036.
+
+**Implementación (2026-07-25, misma rama `t-027-sesion-lider`):**
+- `src/sda/repl.py`: la animación se implementó en la BARRA INFERIOR de `prompt_toolkit`, no por `print()`. Un spinner por `print()`+`\r` choca con `patch_stdout` (que trabaja por líneas) y cada fotograma quedaría escrito en el scrollback de la terminal — el mismo problema que ya justificó que el prompt fuera fijo y mudo en T-030 (ver lección nueva). `PromptSession` se creó con `refresh_interval=0.1` (necesario para que la UI se repinte sola y el spinner gire) y un `Style` que atenúa la barra (de `reverse`, muy ruidosa, a un tono tenue). Nuevo context manager `TerminalUI.trabajando(texto)`: enciende/apaga la barra asignando `self._session.bottom_toolbar` (prompt_toolkit evalúa `Condition(lambda: self.bottom_toolbar is not None)` en cada render). Los trabajos se apilan (`self._trabajos: list[str]`): el subagente tapa al líder mientras dura y al terminar reaparece el del líder. El fotograma se calcula desde `time.monotonic()` (no contando repintados) para que el giro sea parejo aunque se salte algún render. Nuevos tipo `Indicador` e implementación no-op `indicador_mudo` para uso fuera de la terminal (headless).
+- `src/sda/tools/leader_tools.py`: `_conducir_onboarding` recibe ahora `es_correccion: bool` explícito (no se podía inferir ahí abajo, porque a la fase en disco se le acaba de escribir `ONBOARDING` en ambos casos: arranque y corrección). Arranque → "Construyendo …"/"Borrador construido"; corrección → "Actualizando …"/"Borrador actualizado". La rama de auditoría interna pasa `es_correccion=True`. `LeaderTools` recibe el indicador inyectado vía `usar_indicador()`, mudo por defecto, para no acoplarse a la terminal.
+- `src/sda/orchestrator.py`: conecta `ui.trabajando` a las herramientas y envuelve CADA turno del líder con `ui.trabajando(_PENSANDO)` (a petición explícita del usuario, también mientras el líder piensa, no solo mientras trabaja el subagente).
+
+**Verificación:** nuevo spike `spikes/t036_indicador_trabajo.py` (verde): encendido/apagado del indicador, anidamiento (líder tapado por subagente y reaparición al terminar), giro real del spinner por reloj, e indicador mudo sin efecto. Usa `create_app_session` + `DummyOutput` + `create_pipe_input` porque `PromptSession` exige una consola real y falla headless con `NoConsoleScreenBufferError` si se instancia sin ese entorno simulado.
+
+`ruff check src spikes` limpio tras el cambio.

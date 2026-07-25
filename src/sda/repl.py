@@ -12,17 +12,30 @@ from __future__ import annotations
 
 import math
 import sys
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+import time
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 
 import anyio
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.styles import Style
 
 from sda.core.provider import Provider
 
 # Palabras que terminan la sesión (se comparan en minúsculas y sin espacios).
 _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
+
+# Un "indicador" es lo que devuelve :meth:`TerminalUI.trabajando`: se le pasa el texto
+# a mostrar y se usa como ``with``. Existe como tipo para que quien reporte trabajo en
+# curso (p. ej. ``LeaderTools``) dependa de esta firma y no de la terminal entera.
+Indicador = Callable[[str], AbstractContextManager[None]]
+
+
+@contextmanager
+def indicador_mudo(texto: str) -> Iterator[None]:
+    """Indicador que no muestra nada, para cuando no hay terminal (spikes, tests)."""
+    yield
 
 
 # Tenue (dim) en vez de un color fijo: se adapta al esquema de la terminal
@@ -30,6 +43,25 @@ _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
 # Terminal y PowerShell 7+ interpretan estos códigos de forma nativa.
 _DIM = "\x1b[2m"
 _RESET = "\x1b[0m"
+
+# Fotogramas del spinner (braille): giran en el sitio sin cambiar de ancho, así que
+# la línea no "salta" al repintarse.
+_FOTOGRAMAS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# Segundos entre repintados automáticos de la UI. ~10 fps: el giro se ve continuo y
+# el coste es despreciable. También marca el ritmo del spinner, que se calcula por
+# tiempo (no por número de repintados) para que gire parejo aunque se salte alguno.
+_REFRESCO = 0.1
+
+# El estilo por omisión de la barra inferior es ``reverse``: una franja invertida de
+# ancho completo, demasiado ruidosa para un aviso de fondo. Se baja al mismo tono
+# tenue que usa :func:`subagent_line`, para que ambos se lean como "trabajo de fondo".
+_ESTILO = Style.from_dict(
+    {
+        "bottom-toolbar": "noreverse",
+        "bottom-toolbar.text": "noreverse fg:ansibrightblack",
+    }
+)
 
 
 def subagent_line(nombre: str, texto: str) -> str:
@@ -74,15 +106,54 @@ class TerminalUI:
 
     El prompt es fijo y mudo a propósito: un texto que cambie según el estado (un
     "trabajando…") se queda escrito en el historial de la terminal cada vez que se
-    repinta, y ensucia la transcripción de la conversación.
+    repinta, y ensucia la transcripción de la conversación. Lo que sí cambia vive en
+    la **barra inferior** (:meth:`trabajando`), que se repinta en el sitio y nunca
+    entra al historial: mientras algo trabaja se ve una línea viva, y al terminar
+    desaparece sin dejar rastro. En la transcripción solo queda el resultado.
     """
 
     def __init__(self, prompt: str) -> None:
-        self._session: PromptSession[str] = PromptSession(prompt)
+        # ``bottom_toolbar=None`` arranca sin barra; ``trabajando`` la enciende y la
+        # apaga asignando este mismo atributo, que prompt_toolkit consulta en cada
+        # repintado. ``refresh_interval`` es lo que hace que la UI se repinte sola
+        # aunque el humano no toque el teclado: sin él, el spinner no giraría.
+        self._session: PromptSession[str] = PromptSession(
+            prompt,
+            bottom_toolbar=None,
+            refresh_interval=_REFRESCO,
+            style=_ESTILO,
+        )
+        # Pila, no un solo texto: los trabajos se anidan (el líder piensa *mientras*
+        # el subagente trabaja). Se muestra el más reciente y, al cerrarse, reaparece
+        # el que lo envolvía en vez de quedar la barra en blanco.
+        self._trabajos: list[str] = []
         # Buffer infinito: encolar nunca debe bloquear al humano que escribe.
         self._envio, self._recepcion = anyio.create_memory_object_stream[str | None](
             max_buffer_size=math.inf
         )
+
+    def _texto_barra(self) -> str:
+        """Contenido de la barra inferior. prompt_toolkit la llama en cada repintado."""
+        fotograma = _FOTOGRAMAS[int(time.monotonic() / _REFRESCO) % len(_FOTOGRAMAS)]
+        return f"  {fotograma} {self._trabajos[-1]}"
+
+    @contextmanager
+    def trabajando(self, texto: str) -> Iterator[None]:
+        """Muestra ``texto`` con un spinner mientras dure el bloque ``with``.
+
+        Anidable: si ya había un trabajo en curso, este lo tapa y al salir se vuelve
+        a ver el anterior. La barra solo se apaga cuando no queda ninguno.
+        """
+        self._trabajos.append(texto)
+        self._session.bottom_toolbar = self._texto_barra
+        try:
+            yield
+        finally:
+            # Por valor: dos trabajos con el mismo texto son intercambiables, así que
+            # basta con quitar uno cualquiera de ellos.
+            self._trabajos.remove(texto)
+            if not self._trabajos:
+                self._session.bottom_toolbar = None
 
     async def leer(self) -> str | None:
         """Devuelve la siguiente línea del humano, o ``None`` si pidió terminar.

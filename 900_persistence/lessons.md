@@ -19,6 +19,9 @@
 - [L-013 — `allowed_tools` no restringe el toolset bajo `bypassPermissions`: solo auto-aprueba](#l-013--allowed_tools-no-restringe-el-toolset-bajo-bypasspermissions-solo-auto-aprueba)
 - [L-014 — `PromptSession.prompt_async()` de prompt_toolkit 3.0.52 pisa `show_frame` con `False` en cada llamada](#l-014--promptsessionprompt_async-de-prompt_toolkit-3052-pisa-show_frame-con-false-en-cada-llamada)
 - [L-015 — Un campo de estado que solo se escribe y nunca se lee da una falsa sensación de recuperación ante fallos](#l-015--un-campo-de-estado-que-solo-se-escribe-y-nunca-se-lee-da-una-falsa-sensación-de-recuperación-ante-fallos)
+- [L-016 — Un spinner por `print()` es incompatible con `patch_stdout`; la barra inferior con `refresh_interval` es la vía correcta en prompt_toolkit](#l-016--un-spinner-por-print-es-incompatible-con-patch_stdout-la-barra-inferior-con-refresh_interval-es-la-vía-correcta-en-prompt_toolkit)
+- [L-017 — Tras un reinicio, inferir el estado del flujo desde objetos en memoria del proceso es incorrecto: el estado en disco es la única fuente de verdad](#l-017--tras-un-reinicio-inferir-el-estado-del-flujo-desde-objetos-en-memoria-del-proceso-es-incorrecto-el-estado-en-disco-es-la-única-fuente-de-verdad)
+- [L-018 — Comprobar `tasks.md` antes de asignar un código de tarea nuevo, para no colisionar con uno ya ocupado](#l-018--comprobar-tasksmd-antes-de-asignar-un-código-de-tarea-nuevo-para-no-colisionar-con-uno-ya-ocupado)
 
 ## Detalle
 
@@ -111,6 +114,24 @@
 **Contexto:** al explicarle al usuario el flujo end-to-end del orchestrator-leader y qué pasaría ante un apagón, se investigó con grep quién lee `transaction_lock` y `pending_approval_file` (campos de `_harness_state.json`, ver `src/sda/state.py`), que llevaban desde T-028 escribiéndose con diligencia en cada transacción, y que `idea.md` describe en detalle como el mecanismo de recuperación tras una interrupción abrupta (ver T-034).
 **Lección:** ningún módulo de `src/` lee jamás esos dos campos; solo se escriben. El código parecía robusto ante apagones (el estado documentaba la interrupción) y en realidad no lo era, porque nada actuaba sobre esa información al reanudar. Un campo de estado puede dar una falsa sensación de recuperación implementada con solo el hecho de existir y escribirse correctamente, sin que nadie note la ausencia del lector hasta que se busca explícitamente.
 **Aplicación:** al implementar cualquier campo de estado pensado para recuperación ante fallos, verificar con grep (u otra búsqueda equivalente) que existe al menos un lector real en el código, no solo un escritor. Un campo sin lector es documentación de una intención, no un mecanismo funcionando. Ver T-034, C-005.
+
+### L-016 — Un spinner por `print()` es incompatible con `patch_stdout`; la barra inferior con `refresh_interval` es la vía correcta en prompt_toolkit
+**Fecha:** 2026-07-25
+**Contexto:** al implementar T-036 (indicador animado de trabajo en curso), se descartó de entrada la opción de imprimir un spinner por `print()`+`\r`, la vía más obvia.
+**Lección:** un spinner impreso por `print()` con retorno de carro (`\r`) choca con `patch_stdout` (usado desde T-030 para que la salida no se mezcle con el área de entrada de `prompt_toolkit`), porque `patch_stdout` trabaja por líneas: cada fotograma del spinner acabaría escrito como una línea nueva en el historial/scrollback de la terminal, ensuciando la transcripción — exactamente el mismo problema que ya había descartado un prompt dinámico "(trabajando…)" en T-030 (ver D-034). La vía correcta en `prompt_toolkit` es la barra inferior (`bottom_toolbar`) combinada con `refresh_interval` en el `PromptSession`: se repinta en el sitio, nunca entra al scrollback, y `refresh_interval` es indispensable porque sin él la UI no se repinta sola y el spinner no gira.
+**Aplicación:** cualquier indicador animado futuro en la terminal de `sda` debe usar `bottom_toolbar`/`refresh_interval` de `prompt_toolkit` (o mecanismo equivalente que no imprima línea a línea), nunca `print()` con `\r` bajo `patch_stdout`.
+
+### L-017 — Tras un reinicio, inferir el estado del flujo desde objetos en memoria del proceso es incorrecto: el estado en disco es la única fuente de verdad
+**Fecha:** 2026-07-25
+**Contexto:** causa raíz de T-033: `_tool_run_inner_loop` decidía si era "primera vez" mirando `self._inner is None`, un atributo que vive solo en memoria del proceso Python.
+**Lección:** tras un reinicio del proceso, cualquier objeto en memoria vuelve a su estado inicial (`self._inner` siempre `None`), sin importar cuánto haya avanzado el trabajo en sesiones anteriores; solo el estado persistido en disco (`_harness_state.json`, el borrador ya escrito) refleja la realidad del proyecto. Decidir el comportamiento del flujo a partir de un objeto en memoria del proceso, en vez del estado en disco, produce comportamiento incorrecto y silencioso justo en el escenario más probable de fallo (reanudar tras un reinicio).
+**Aplicación:** en cualquier punto del harness donde haya que decidir "¿es la primera vez o ya hay trabajo previo?", consultar el estado en disco (fase, archivos ya escritos), nunca un atributo en memoria del proceso que no sobrevive a un reinicio. Ver también L-015 (mismo patrón de fondo: un mecanismo de recuperación que existe en el papel pero no se usa realmente).
+
+### L-018 — Comprobar `tasks.md` antes de asignar un código de tarea nuevo, para no colisionar con uno ya ocupado
+**Fecha:** 2026-07-25
+**Contexto:** al registrar la nueva tarea del indicador animado de trabajo en curso, el candidato obvio por orden numérico era T-035, pero ese código ya estaba ocupado por "Diseñar un protocolo de cierre de sesión para el producto sda" (registrada en una sesión anterior, todavía No implementada).
+**Lección:** un código de tarea "siguiente disponible" no se puede asumir solo por continuidad numérica con la última tarea mencionada en la conversación; hay que verificar contra el índice real de `tasks.md`, porque puede haber tareas registradas en sesiones anteriores que aún no se implementaron y que ocupan el siguiente número aparente.
+**Aplicación:** antes de crear una entrada nueva en `tasks.md` (ya sea durante la sesión de trabajo o en el cierre), revisar el índice completo del archivo para confirmar cuál es el próximo código realmente libre, en vez de incrementar mentalmente desde la última tarea recordada.
 
 <!--
 ### L-XXX — Título breve
