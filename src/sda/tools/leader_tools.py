@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sda import bootstrap, state
+from sda import bootstrap, memory, state
 from sda.core.provider import Provider
 from sda.core.session import Session
 from sda.core.tool import InProcessTool
@@ -87,16 +87,19 @@ def _set_frontmatter(project_dir: Path, campo: str, valor: str) -> None:
 
 
 def _sincronizar_persistencia(project_dir: Path) -> None:
-    """Marca en ``_persistence/progress.md`` que el onboarding se completó.
+    """Deja constancia del hito de onboarding en la memoria del proyecto.
 
-    Sincronización mínima de esta rebanada (Step 10 de ``idea.md``): deja
-    constancia del hito. La gestión rica de tasks/progress llega después.
+    Step 10 de ``idea.md``. Es el único apunte **automático** de la bitácora: ocurre
+    sí o sí al cruzar la puerta de aprobación, sin depender de que el líder decida
+    registrarlo. El resto de la memoria la escribe él mismo con ``MemoryTools``
+    (T-029), según lo que vaya ocurriendo en la conversación.
     """
-    progreso = project_dir / bootstrap.PERSISTENCE_DIR / "progress.md"
-    progreso.parent.mkdir(parents=True, exist_ok=True)
-    linea = "- Onboarding completado: _prototype/document-extract.md APROBADO por el humano.\n"
-    with progreso.open("a", encoding="utf-8") as fh:
-        fh.write(linea)
+    memory.append_progress(
+        project_dir,
+        "Onboarding completado",
+        f"El humano aprobó {bootstrap.EXTRACT_FILE}. El extracto de contexto queda "
+        "APPROVED y el proyecto listo para la jornada de trabajo.",
+    )
 
 
 class LeaderTools:

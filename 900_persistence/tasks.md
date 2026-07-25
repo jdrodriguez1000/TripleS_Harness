@@ -40,8 +40,13 @@
 | T-026 | Fijar explícitamente modelo y esfuerzo de razonamiento del onboarding-reader (Sonnet + effort high) en vez del default implícito del CLI/SDK | Implementada |
 | T-027 | Analizar qué implica tener un agente como sesión principal/líder que orqueste todo (Opus + effort high): diseño, impacto en el bucle externo, costo y observabilidad | Implementada |
 | T-028 | Implementar el rediseño de T-027: herramientas en-proceso, prompt del orchestrator-leader y refactor de orchestrator.py | Implementada |
-| T-029 | Diseñar memoria/persistencia del orchestrator-leader sobre el proyecto destino (avance, tareas, decisiones, lecciones) | No implementada |
+| T-029 | Diseñar e implementar la memoria/persistencia del orchestrator-leader sobre el proyecto destino (avance, tareas, decisiones, lecciones) | Implementada |
 | T-030 | Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario en la terminal del orchestrator-leader | Implementada |
+| T-031 | Tolerar errores transitorios de la API en las sesiones del harness | No implementada |
+| T-032 | Definir identidad, tono y reglas invariantes del orchestrator-leader (system prompt reestructurado) | Implementada |
+| T-033 | Defecto: tras un reinicio, la primera corrección del humano se descarta y el borrador se regenera desde cero | No implementada |
+| T-034 | Defecto: un apagón durante el bucle interno deja al líder creyendo que el proyecto es nuevo (transaction_lock sin lector) | No implementada |
+| T-035 | Diseñar un protocolo de cierre de sesión para el producto `sda` (equivalente a session-end-protocol, sobre `_persistence/`) | No implementada |
 
 ## Detalle de tareas
 
@@ -279,10 +284,10 @@ Después de implementar: prueba end-to-end en vivo del flujo rediseñado (análo
 
 **Hallazgo de seguridad y hardening (2026-07-24):** al probar en una carpeta de proyecto real (fuera del repo), se detectó que las citas del líder (números de línea) eran reales porque el líder tenía en la práctica acceso de lectura sin restricción. Se confirmó (docs oficiales de `claude-agent-sdk` + pruebas en vivo) que `allowed_tools` NO restringe el toolset bajo `permission_mode="bypassPermissions"`: solo auto-aprueba, no quita herramientas; por lo tanto el "sandbox" que se creía tener tanto en el líder como en el onboarding-reader (desde T-024) nunca restringió nada de verdad (ver L-013). El mecanismo real de restricción es `tools=`/`disallowed_tools=`, verificado en vivo (`tools=["Glob"]` impide leer archivos). Se agregó el parámetro `builtin_tools` al contrato `Provider.create_session` (mapea a `tools=` del SDK), como sandbox duro por agente, distinto de `allowed_tools`: el líder pasó a `builtin_tools=["Read","Glob","Grep"]` (solo lectura) y el onboarding-reader de `allowed_tools=[...]` a `builtin_tools=["Read","Glob","Grep","Write"]` (ver D-031). Verificado en vivo en dos pruebas: (1) sandbox duro — sesión de solo lectura, ante orden explícita de crear `HACK.txt`, respondió que no podía y el archivo no se creó; (2) E2E completo post-hardening llegó de nuevo a APPROVED/READY_FOR_WORK, confirmando que las herramientas MCP en-proceso siguen funcionando bajo `builtin_tools` restrictivo y que el onboarding-reader sigue pudiendo escribir su entregable dentro de su sandbox. El merge de `t-027-sesion-lider` a master queda explícitamente pospuesto por el usuario (no se hace en esta sesión).
 
-### T-029 — Diseñar memoria/persistencia del orchestrator-leader sobre el proyecto destino
-**Estado:** No implementada
+### T-029 — Diseñar e implementar la memoria/persistencia del orchestrator-leader sobre el proyecto destino
+**Estado:** Implementada
 **Fecha creación:** 2026-07-25
-**Fecha actualización:** 2026-07-25
+**Fecha actualización:** 2026-07-25 (implementada en sesión posterior, misma fecha calendario)
 
 Tarea de análisis/diseño (no de implementación) surgida al mejorar la UX de mensajería del líder (T-027/T-028 ya en producción). A medida que el `orchestrator-leader` gana más responsabilidad (hoy onboarding, mañana arquitectura o construcción de features), el usuario quiere que **siempre tenga conocimiento de todo lo hecho en el proyecto destino**: avance, tareas realizadas, decisiones tomadas, lecciones aprendidas. Aplica exclusivamente al **plano del producto `sda`** (el proyecto sobre el que opera, vía `project_dir`), no a `900_persistence/` de este repo (que es memoria de este harness para Claude Code, un plano distinto y ya resuelto).
 
@@ -296,7 +301,26 @@ Hallazgos de la conversación de análisis (2026-07-25), sin implementar aún:
   2. *Escritura:* hoy solo hay un escritor determinista de un evento fijo. Falta que el líder pueda registrar decisiones/lecciones mientras conversa. Recomendación: seguir el principio ya usado en el codebase ("el LLM decide, la herramienta hace cumplir", D-026) con herramientas en-proceso acotadas (p. ej. `record_decision`, `record_lesson`, `record_progress`) en vez de un `Write` genérico, para que el formato/append quede garantizado y no se pueda escribir fuera de `_persistence/`.
 - **Relación con tareas pausadas:** complementa T-020 (persistencia de la sesión del SDK) sin sustituirla — una bitácora en Markdown no depende de garantías del proveedor, sobrevive a cambios de modelo y es auditable/editable a mano por el humano (mismo patrón que `scope.md`), mientras que T-020 resolvería memoria conversacional fina si algún día se retoma.
 
-Pendiente explícito: diseñar en detalle el contrato de las nuevas herramientas de escritura, qué instrucciones exactas van al prompt del líder para la lectura al arrancar, y si conviene resumir/comprimir `_persistence/` en el mensaje de apertura en vez de dejar que el líder la lea bajo demanda con `Read`.
+Pendiente explícito (del análisis original): diseñar en detalle el contrato de las nuevas herramientas de escritura, qué instrucciones exactas van al prompt del líder para la lectura al arrancar, y si conviene resumir/comprimir `_persistence/` en el mensaje de apertura en vez de dejar que el líder la lea bajo demanda con `Read`.
+
+**Implementación (sesión posterior, 2026-07-25, misma rama `t-027-sesion-lider`):** se resolvieron todos los huecos pendientes. Documento de diseño completo en `docs/design/T-029-memoria-lider.md` (nuevo).
+
+Archivos nuevos:
+- `src/sda/memory.py` — módulo de dominio determinista sobre `_persistence/` del proyecto destino: siembra idempotente (`seed`, respeta ediciones a mano y repara proyectos anteriores a T-029 cuya `_persistence/` nació vacía), escritores (`append_progress`, `add_task`, `update_task`, `add_decision`, `add_lesson`) y `build_digest`. Numeración correlativa calculada en Python (máximo+1, no cantidad de entradas), rutas forzadas dentro de `_persistence/` (sin poder escapar a otras partes del proyecto destino), escritura atómica (archivo temporal + `os.replace`), excepción `MemoriaError` traducida a texto accionable para el líder.
+- `src/sda/tools/memory_tools.py` — clase `MemoryTools` con 5 herramientas en-proceso: `record_progress`, `record_task`, `update_task`, `record_decision`, `record_lesson`. El líder pasó de 3 a 8 herramientas en total.
+- `src/sda/templates/persistence/{progress,tasks,decisions,lessons}.md` — 4 plantillas empaquetadas, usadas por `seed()`.
+- `spikes/t029_memoria_lider.py` — verificación headless con 7 comprobaciones, todas en verde: siembra idempotente que respeta ediciones a mano; reparación de un proyecto anterior a T-029; numeración correlativa correcta; tabla-índice sincronizada con el detalle; rechazo de entradas inválidas con mensaje accionable; digest que muestra lo abierto, oculta lo cerrado y respeta su tope de caracteres; herramientas con confirmación/rechazo legibles para el líder.
+
+Archivos modificados:
+- `src/sda/bootstrap.py` — la siembra de memoria ahora ocurre SIEMPRE (antes del corte por reanudación), para reparar también proyectos anteriores a T-029 cuya `_persistence/` nacía vacía. `PERSISTENCE_DIR` pasa a definirse en `memory.py` y se reexporta desde `bootstrap.py`.
+- `src/sda/tools/leader_tools.py` — `_sincronizar_persistencia()` usa `memory.append_progress` en vez de un append crudo de texto.
+- `src/sda/orchestrator.py` — registra `MemoryTools` junto a `LeaderTools`; se separó `_instruccion_apertura()` (texto fijo de instrucción) de `_mensaje_apertura()` (ahora inyecta además el digest de memoria construido con `build_digest`).
+- `src/sda/tools/__init__.py` — exporta `MemoryTools`.
+- `pyproject.toml` — `package-data` incluye `templates/persistence/*.md`.
+
+Durante el desarrollo, el spike detectó un fallo de diseño real (no un fallo del test): un proyecto recién sembrado generaba secciones con el texto "Sin avances registrados todavía" en vez de un digest vacío/ausente. Se corrigió en `memory.py`: las secciones sin contenido se omiten del digest, no se rellenan con un texto de relleno.
+
+**Verificación:** spike headless en verde (las 7 comprobaciones descritas arriba). **Pendiente explícito:** verificación en vivo con `sda start` en una carpeta de proyecto real (el spike no puede cubrir si el líder decide bien CUÁNDO registrar en la memoria durante una conversación real, ni si el tono nuevo del prompt (ver T-032) se siente como se pretende). Es la primera tarea sugerida para la próxima sesión.
 
 ### T-030 — Resolver el entrelazado visual entre la salida en streaming y el teclado del usuario
 **Estado:** Implementada
@@ -342,3 +366,57 @@ Tarea surgida de un incidente real durante una prueba de `sda start` (2026-07-25
 - Definir el comportamiento cuando se agotan los reintentos: idealmente **no** matar la sesión del líder, sino informar al humano y devolverle el control para que reintente el turno a mano, conservando el contexto.
 
 **Relación con otras tareas:** independiente de T-029 (memoria del líder en el proyecto destino), aunque ambas atacan la misma fragilidad de fondo — que hoy toda la memoria de trabajo vive en una sesión en RAM que un error puede borrar. También se relaciona con T-020 (persistir/reanudar conversaciones del SDK): si T-020 se retomara algún día, un fallo irrecuperable dejaría de ser tan costoso.
+
+### T-032 — Definir identidad, tono y reglas invariantes del orchestrator-leader
+**Estado:** Implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Tarea surgida junto con T-029, pedido explícito del usuario: reescribir `src/sda/prompts/orchestrator_leader.md`, que hasta ahora era un bloque de texto mezclado sin estructura estable. Quedó reorganizado en seis secciones: **Identidad** → **Reglas que nunca rompes** (7 reglas numeradas) → **Tono** → **La memoria del proyecto** (instrucciones de lectura/escritura de T-029) → **Tus herramientas** → **El flujo que diriges ahora** (onboarding). Solo la última sección debe crecer cuando el líder gane fases nuevas (arquitectura, construcción, etc.); las cinco primeras son estables y no deberían cambiar por cada fase nueva.
+
+Decisiones tomadas dentro de esta tarea:
+- El líder se presenta ante el humano como **Project Manager**, sin nombre propio (ver D-038). El nombre técnico del componente en el código y en la documentación (`orchestrator-leader`) NO cambió en ningún sitio; es puramente la forma en que el líder se presenta en la conversación.
+- Regla nueva nº 3, "nunca inventas hechos del proyecto", agregada como contrapeso directo al riesgo que introduce la nueva bitácora de T-029: un dato inventado que el líder registrase ahí contaminaría todas las sesiones futuras que lean el digest, a diferencia de una alucinación puntual en una sola respuesta.
+
+Verificación: no tiene verificación automatizada propia (es texto de prompt); su efecto se prueba junto con T-029 en la verificación en vivo pendiente para la próxima sesión.
+
+### T-033 — Defecto: tras un reinicio, la primera corrección del humano se descarta y el borrador se regenera desde cero
+**Estado:** No implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Defecto real detectado y VERIFICADO ejecutando código (no es una suposición), anterior a esta sesión (viene de T-028), no introducido por T-029. Surgió al explicarle al usuario el flujo end-to-end y qué pasa ante un apagón del proceso.
+
+**Causa:** `_tool_run_inner_loop` en `src/sda/tools/leader_tools.py` decide si esta es "la primera vez" que se conduce el bucle interno mirando si `self._inner is None` (la `Session` Python interna en memoria). Tras un reinicio del proceso, `self._inner` SIEMPRE es `None`, aunque en disco ya exista un borrador (`_prototype/document-extract.md`) esperando corrección en fase `HUMAN_REVIEW`.
+
+**Verificación (2026-07-25):** con un provider falso (stub) y feedback de prueba "Corrige la sección de usuarios: los externos NO llevan login", el onboarding-reader recibió en la práctica `_INSTRUCCION_INICIAL` ("Ejecuta tu tarea ahora... escribe `_prototype/document-extract.md` instanciando la plantilla"), no la corrección pedida. El humano ve aparecer un borrador nuevo que ignora por completo lo que acaba de pedir, sin ningún aviso ni error visible. Es el escenario MÁS PROBABLE tras un apagón real, porque el estado del harness suele quedar justo en la puerta de revisión humana (`HUMAN_REVIEW`) cuando se interrumpe la sesión.
+
+**Arreglo propuesto (sin implementar):** dejar de inferir "primera vez" a partir del objeto en memoria (`self._inner is None`) y mirar en su lugar el estado en disco: si la fase actual es `HUMAN_REVIEW`, ya existe un borrador, por lo tanto es una corrección y no un arranque, sin importar si `self._inner` está vacío por ser la primera invocación de este proceso.
+
+**Relación:** causa raíz asociada a C-005 (la conversación vive solo en memoria del proceso). Es el más urgente de los dos defectos (T-033/T-034) por ser silencioso: no hay ningún error ni aviso, el humano simplemente recibe un resultado equivocado.
+
+### T-034 — Defecto: un apagón durante el bucle interno deja al líder creyendo que el proyecto es nuevo
+**Estado:** No implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Defecto real detectado y VERIFICADO con grep (no es una suposición), anterior a esta sesión (viene de T-028), no introducido por T-029. Surgió en la misma conversación que T-033, al analizar qué pasa ante un apagón durante el bucle interno (no en la puerta de revisión, sino mientras el onboarding-reader todavía está generando el borrador).
+
+**Causa de fondo verificada con grep:** `transaction_lock` y `pending_approval_file` (campos de `_harness_state.json`, ver `src/sda/state.py`) SOLO SE ESCRIBEN, NUNCA SE LEEN por ningún módulo de `src/`. La recuperación que `idea.md` describe explícitamente ("si el harness lee `transaction_lock: true` al arrancar, comprende que la sesión anterior se interrumpió de forma abrupta") NO está implementada en ninguna parte del código.
+
+**Consecuencia:** un apagón durante el bucle interno deja el estado con `transaction_lock: true` y fase `ONBOARDING`. Al reanudar, `_instruccion_apertura()` (en `src/sda/orchestrator.py`) mete la fase `ONBOARDING` en la misma rama de código que `BOOTSTRAPPING`, y le dice al líder algo equivalente a "el humano acaba de iniciar el harness en un proyecto nuevo, pídele que edite `_context/scope.md`", pidiéndole al humano un scope que ya escribió, con un `_prototype/document-extract.md` posiblemente a medias en disco y el lock nunca liberado.
+
+**Arreglo propuesto (sin implementar):** agregar una rama propia en `_instruccion_apertura()` para el caso "sesión interrumpida": leer `transaction_lock`/`pending_approval_file` del estado en disco y, si están activos, avisar al líder de la interrupción en vez de tratar el proyecto como nuevo.
+
+**Relación:** comparte causa de fondo con T-033 (recuperación de estado incompleta tras un apagón) pero es un caso distinto (interrupción durante el bucle interno, no durante la revisión humana). Registrado como lección L-015. El usuario decidió explícitamente NO arreglar T-033 ni T-034 en esta sesión, solo registrarlos como tareas.
+
+### T-035 — Diseñar un protocolo de cierre de sesión para el producto `sda`
+**Estado:** No implementada
+**Fecha creación:** 2026-07-25
+**Fecha actualización:** 2026-07-25
+
+Tarea dejada explícitamente fuera de alcance por el usuario al acordar el alcance de T-029, registrada ahora como pendiente. Es el complemento natural de T-029: hoy `sda start` se cierra con el comando `salir`/Ctrl+C y no existe ningún momento de consolidación de la memoria del proyecto destino, análogo al `session-end-protocol` que este mismo repo usa sobre `900_persistence/`.
+
+En este repo (`TripleS_Harness`), `900_persistence/` se mantiene al día porque el cierre de sesión es un protocolo obligatorio, ejecutado por un agente dedicado (`session-closer`). El producto `sda` no tiene ningún equivalente: la bitácora en `_persistence/` del proyecto destino (T-029) depende enteramente de que el `orchestrator-leader` decida registrar cosas DURANTE la conversación, por su propio criterio. Hoy solo hay UN apunte automático garantizado en todo el flujo (la línea de progreso que escribe `promote_to_approved` al aprobar el onboarding, ver `leader_tools.py::_sincronizar_persistencia`); todo lo demás depende del criterio del modelo en cada turno, sin ningún cierre forzado.
+
+Pendiente de diseñar: si conviene un comando explícito de cierre (análogo a `aprobar`/`rechazar`) que dispare una consolidación final de la memoria antes de salir, o alguna otra forma de garantizar que la sesión no termine sin dejar registro de lo ocurrido.

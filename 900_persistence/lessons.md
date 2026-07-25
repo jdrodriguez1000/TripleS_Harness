@@ -18,6 +18,7 @@
 - [L-012 — El SDK soporta herramientas en-proceso que conviven con autenticación por suscripción y con una Session anidada](#l-012--el-sdk-soporta-herramientas-en-proceso-que-conviven-con-autenticación-por-suscripción-y-con-una-session-anidada)
 - [L-013 — `allowed_tools` no restringe el toolset bajo `bypassPermissions`: solo auto-aprueba](#l-013--allowed_tools-no-restringe-el-toolset-bajo-bypasspermissions-solo-auto-aprueba)
 - [L-014 — `PromptSession.prompt_async()` de prompt_toolkit 3.0.52 pisa `show_frame` con `False` en cada llamada](#l-014--promptsessionprompt_async-de-prompt_toolkit-3052-pisa-show_frame-con-false-en-cada-llamada)
+- [L-015 — Un campo de estado que solo se escribe y nunca se lee da una falsa sensación de recuperación ante fallos](#l-015--un-campo-de-estado-que-solo-se-escribe-y-nunca-se-lee-da-una-falsa-sensación-de-recuperación-ante-fallos)
 
 ## Detalle
 
@@ -104,6 +105,12 @@
 **Contexto:** al probar (y luego revertir) la opción de recuadrar el área de entrada con `show_frame=True` durante la implementación de T-030, el marco no aparecía en pantalla pese a pasarlo al constructor de `PromptSession`.
 **Lección:** `PromptSession.prompt_async()` declara el parámetro `show_frame: FilterOrBool = False` (en vez de `= None`, como sí hace `prompt()` síncrono). Como el cuerpo del método ejecuta `if show_frame is not None: self.show_frame = show_frame`, cada llamada a `prompt_async()` sobrescribe con `False` el valor dado al construir la sesión, sin importar qué se haya configurado antes. Se descubrió renderizando el layout a un `Screen` manualmente, porque la captura del `Vt100_Output` no mostraba el marco.
 **Aplicación:** si en el futuro se necesita usar `show_frame` (u otro parámetro con esta misma asimetría entre `prompt()` y `prompt_async()`) en un flujo async, hay que pasarlo explícitamente en cada llamada a `prompt_async(...)`, no confiar en el valor fijado al construir `PromptSession`.
+
+### L-015 — Un campo de estado que solo se escribe y nunca se lee da una falsa sensación de recuperación ante fallos
+**Fecha:** 2026-07-25
+**Contexto:** al explicarle al usuario el flujo end-to-end del orchestrator-leader y qué pasaría ante un apagón, se investigó con grep quién lee `transaction_lock` y `pending_approval_file` (campos de `_harness_state.json`, ver `src/sda/state.py`), que llevaban desde T-028 escribiéndose con diligencia en cada transacción, y que `idea.md` describe en detalle como el mecanismo de recuperación tras una interrupción abrupta (ver T-034).
+**Lección:** ningún módulo de `src/` lee jamás esos dos campos; solo se escriben. El código parecía robusto ante apagones (el estado documentaba la interrupción) y en realidad no lo era, porque nada actuaba sobre esa información al reanudar. Un campo de estado puede dar una falsa sensación de recuperación implementada con solo el hecho de existir y escribirse correctamente, sin que nadie note la ausencia del lector hasta que se busca explícitamente.
+**Aplicación:** al implementar cualquier campo de estado pensado para recuperación ante fallos, verificar con grep (u otra búsqueda equivalente) que existe al menos un lector real en el código, no solo un escritor. Un campo sin lector es documentación de una intención, no un mecanismo funcionando. Ver T-034, C-005.
 
 <!--
 ### L-XXX — Título breve

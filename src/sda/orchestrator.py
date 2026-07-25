@@ -20,11 +20,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sda import bootstrap, state
+from sda import bootstrap, memory, state
 from sda.core.provider import Provider
 from sda.repl import terminal_ui
 from sda.resources import load_prompt
-from sda.tools import LeaderTools
+from sda.tools import LeaderTools, MemoryTools
 
 _COMANDOS_SALIDA = frozenset({"salir", "exit", "quit"})
 
@@ -42,13 +42,8 @@ _LEADER_PROMPT_FILE = "orchestrator_leader.md"
 _LEADER_TOOLS = ["Read", "Glob", "Grep"]
 
 
-def _mensaje_apertura(st: state.HarnessState, recien_creado: bool) -> str:
-    """Primer turno que se le da al líder para que salude según el estado.
-
-    No lo ve el humano: es la instrucción interna que orienta al líder sobre en qué
-    punto del flujo arranca (proyecto nuevo, borrador esperando revisión, o ya
-    aprobado), para que su saludo sea coherente al reanudar.
-    """
+def _instruccion_apertura(st: state.HarnessState, recien_creado: bool) -> str:
+    """Instrucción de arranque según el punto del flujo en que se reanuda."""
     fase = st.current_phase
     if recien_creado or fase in (state.PHASE_BOOTSTRAPPING, state.PHASE_ONBOARDING):
         return (
@@ -75,6 +70,29 @@ def _mensaje_apertura(st: state.HarnessState, recien_creado: bool) -> str:
     )
 
 
+def _mensaje_apertura(
+    project_dir: Path, st: state.HarnessState, recien_creado: bool
+) -> str:
+    """Primer turno que se le da al líder para que salude según el estado.
+
+    No lo ve el humano: es la instrucción interna que orienta al líder sobre en qué
+    punto del flujo arranca (proyecto nuevo, borrador esperando revisión, o ya
+    aprobado), para que su saludo sea coherente al reanudar.
+
+    Desde T-029 lleva además el **digest de la memoria del proyecto**: un resumen
+    acotado de ``_persistence/`` construido en Python. Se *empuja* en vez de dejar
+    que el líder lo lea bajo demanda por dos razones: así arranca informado **siempre**
+    (no depende de que el modelo decida leer) y el costo del arranque queda con techo
+    fijo, en vez de crecer con la antigüedad del proyecto. El detalle completo le
+    sigue quedando a un ``Read`` de distancia.
+
+    El digest va primero y la instrucción al final, que es la parte accionable.
+    """
+    instruccion = _instruccion_apertura(st, recien_creado)
+    digest = memory.build_digest(project_dir)
+    return f"{digest}\n\n{instruccion}" if digest else instruccion
+
+
 class Orchestrator:
     """Conduce el doble bucle sobre una carpeta de proyecto, liderado por el agente."""
 
@@ -82,6 +100,7 @@ class Orchestrator:
         self._provider = provider
         self._project_dir = project_dir
         self._tools = LeaderTools(provider, project_dir)
+        self._memory = MemoryTools(project_dir)
 
     async def run(self) -> int:
         """Ejecuta el bucle externo hasta que el humano salga. Devuelve el exit code."""
@@ -94,7 +113,10 @@ class Orchestrator:
             builtin_tools=_LEADER_TOOLS,
             model=_LEADER_MODEL,
             effort=_LEADER_EFFORT,
-            in_process_tools=self._tools.as_in_process_tools(),
+            in_process_tools=(
+                self._tools.as_in_process_tools()
+                + self._memory.as_in_process_tools()
+            ),
         )
 
         def _mostrar(texto: str) -> None:
@@ -119,7 +141,10 @@ class Orchestrator:
             async with terminal_ui("\n> ") as ui:
                 # El líder abre saludando, orientado por el estado actual del proyecto.
                 # Es el único interlocutor del humano, así que su texto no lleva etiqueta.
-                await leader.send(_mensaje_apertura(st, recien_creado), on_text=_mostrar)
+                await leader.send(
+                    _mensaje_apertura(self._project_dir, st, recien_creado),
+                    on_text=_mostrar,
+                )
 
                 while True:
                     linea = await ui.leer()

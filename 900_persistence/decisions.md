@@ -38,6 +38,10 @@
 - [D-032 — El líder es el único interlocutor visible en terminal, con streaming real de texto](#d-032--el-líder-es-el-único-interlocutor-visible-en-terminal-con-streaming-real-de-texto)
 - [D-033 — El merge de `t-027-sesion-lider` a master queda bloqueado hasta resolver T-030](#d-033--el-merge-de-t-027-sesion-lider-a-master-queda-bloqueado-hasta-resolver-t-030)
 - [D-034 — El área de entrada del harness es un prompt en línea, fijo y mudo (sin recuadro ni indicadores de estado)](#d-034--el-área-de-entrada-del-harness-es-un-prompt-en-línea-fijo-y-mudo-sin-recuadro-ni-indicadores-de-estado)
+- [D-035 — La memoria del proyecto destino (`_persistence/`) es Markdown, no JSON — supersede a D-004 en formato](#d-035--la-memoria-del-proyecto-destino-_persistence-es-markdown-no-json--supersede-a-d-004-en-formato)
+- [D-036 — El conocimiento de la memoria se empuja como digest acotado en el mensaje de apertura](#d-036--el-conocimiento-de-la-memoria-se-empuja-como-digest-acotado-en-el-mensaje-de-apertura)
+- [D-037 — La escritura de la memoria del proyecto destino va por herramientas en-proceso, nunca por `Write`](#d-037--la-escritura-de-la-memoria-del-proyecto-destino-va-por-herramientas-en-proceso-nunca-por-write)
+- [D-038 — El líder tiene identidad de rol (Project Manager) sin nombre propio](#d-038--el-líder-tiene-identidad-de-rol-project-manager-sin-nombre-propio)
 
 ## Detalle
 
@@ -68,6 +72,7 @@
 **Razón:** evitar confundir la infraestructura de desarrollo del harness con el producto que el harness genera.
 **Alternativas consideradas:** unificar ambas memorias en un solo esquema.
 **Impacto:** ref T-007.
+**SUPERSEDIDA EN FORMATO (2026-07-25, ver D-035):** la separación conceptual de PLANOS que esta decisión establece (memoria de construcción del harness vs. memoria del producto que el harness genera) se mantiene intacta y sigue vigente. Solo cambia el formato de `_persistence/`: en vez de JSON (como preveía esta decisión y como sugería `idea.md` con `tasks.json`), T-029 la implementó en Markdown, igual que `900_persistence/`. Ver D-035 para la razón completa.
 
 ### D-005 — El evaluador de calidad es un agente aparte del orchestrator-leader
 **Fecha:** 2026-07-23
@@ -312,6 +317,34 @@ TripleS_Harness/
 **Razón:** durante la implementación de T-030 se probaron dos alternativas y ambas se descartaron: un prompt dinámico que mostraba "(trabajando…)" mientras el agente procesaba quedaba escrito en el scrollback de la terminal cada vez que se repintaba, ensuciando la transcripción de la conversación; y un recuadro (`show_frame=True`) imitando la UX de Claude Code, aunque funcionó técnicamente, fue rechazado por el usuario tras probarlo en vivo por preferencia visual ("no se ve muy bien"). Un prompt fijo y mudo evita ambos problemas sin sacrificar la robustez ya lograda (el tecleo del humano nunca se pierde ni se entrelaza visualmente, ver T-030).
 **Alternativas consideradas:** prompt dinámico con indicador de estado (descartada, ensucia el scrollback); recuadro del área de entrada con `show_frame=True` (descartada, preferencia visual del usuario tras verificarlo en vivo); `Application` de pantalla completa de `prompt_toolkit` con `HSplit`/`Frame` (descartada en el análisis previo por perder el scrollback nativo de la terminal y obligar a enrutar toda la salida a un buffer propio).
 **Impacto:** ref T-030 (`src/sda/repl.py::TerminalUI`). Si en el futuro hace falta una señal de "trabajando", la vía limpia sin ensuciar el scrollback es el `bottom_toolbar` de `prompt_toolkit`, que se borra automáticamente cuando el prompt retorna (no evaluado en código, solo identificado como la opción correcta a futuro).
+
+### D-035 — La memoria del proyecto destino (`_persistence/`) es Markdown, no JSON — supersede a D-004 en formato
+**Fecha:** 2026-07-25
+**Decisión:** `_persistence/` del proyecto destino (memoria del orchestrator-leader sobre el producto que construye, ref T-029) se implementa en Markdown, con el mismo esquema de archivos ya usado por `900_persistence/` de este repo (`progress.md`, `tasks.md`, `decisions.md`, `lessons.md`). Decisión explícita del usuario, que supersede a D-004 en cuanto al formato (D-004 decía "no deben unificarse ni siquiera en formato"; `idea.md` hablaba de `tasks.json`).
+**Razón:** quien escribe y quien lee esa memoria son LLMs (el orchestrator-leader al escribir, el propio líder u otros agentes futuros al leer); un JSON rígido es justamente el tipo de formato que un modelo rompe con más facilidad (comillas, comas finales, escapes). Además el humano debe poder auditar y corregir la bitácora a mano, patrón ya validado en este mismo proyecto con `_context/scope.md`; y el esquema de `900_persistence/` ya está probado en la práctica durante meses de trabajo en este repo, no hay que inventar uno nuevo.
+**Alternativas consideradas:** mantener JSON como preveía D-004/`idea.md` (descartada por la fragilidad de escritura por LLM y la dificultad de edición manual); un formato intermedio tipo YAML (no evaluado en profundidad, descartado por no aportar ventaja clara sobre Markdown para este caso).
+**Impacto:** ref T-029, D-004 (superseida en formato, no en la separación de planos que sigue vigente). Deja una desviación consciente frente a `idea.md`.
+
+### D-036 — El conocimiento de la memoria se empuja como digest acotado en el mensaje de apertura
+**Fecha:** 2026-07-25
+**Decisión:** el líder recibe el conocimiento de `_persistence/` como un digest de tamaño acotado (`DIGEST_MAX_CHARS = 4000`) inyectado directamente en el mensaje de apertura de la conversación (`_mensaje_apertura()` en `src/sda/orchestrator.py`), en vez de depender de que el líder decida por su cuenta leer los archivos con `Read`.
+**Razón:** un modelo de "pull" (dejar que el líder use `Read` cuando lo considere necesario) no da ninguna garantía de que efectivamente lea la memoria antes de actuar, y en la práctica tomaría 3-4 turnos de Opus antes del primer saludo al humano, leyendo archivos completos cuyo tamaño crece sin límite con el tiempo. Un "push" del digest completo de cada archivo tampoco sirve: el costo de contexto crece sin techo turno a turno y acaba desbordando la ventana de contexto según el proyecto madura.
+**Alternativas consideradas:** pull vía `Read` a iniciativa del líder (descartada: sin garantía de que ocurra, y costosa en turnos antes del primer saludo); push completo de todos los archivos de `_persistence/` (descartada: costo creciente sin techo).
+**Impacto:** ref T-029 (`src/sda/memory.py::build_digest`, `src/sda/orchestrator.py::_mensaje_apertura`).
+
+### D-037 — La escritura de la memoria del proyecto destino va por herramientas en-proceso, nunca por `Write`
+**Fecha:** 2026-07-25
+**Decisión:** el líder solo puede escribir en `_persistence/` mediante las herramientas en-proceso dedicadas (`record_progress`, `record_task`, `update_task`, `record_decision`, `record_lesson` de `MemoryTools`), nunca mediante la herramienta nativa `Write`.
+**Razón:** no es una preferencia de estilo. El sandbox del líder es `builtin_tools=["Read","Glob","Grep"]` (ver D-031): darle `Write` reabriría exactamente el agujero de seguridad cerrado en T-028, porque el líder podría entonces escribir `_harness_state.json` directamente o forzar una aprobación saltándose la puerta de `promote_to_approved` (D-028). Es aplicación directa de D-026 ("el LLM decide, las herramientas hacen cumplir") y consecuencia de L-013 (`allowed_tools` no restringe de verdad; solo `tools=`/`builtin_tools` lo hace).
+**Alternativas consideradas:** dar `Write` al líder solo para la carpeta `_persistence/` (descartada: `builtin_tools`/`tools=` no permite restringir por subcarpeta, solo por nombre de herramienta; abriría `Write` a todo el proyecto destino).
+**Impacto:** ref T-029 (`src/sda/tools/memory_tools.py`), D-026, D-028, D-031, L-013.
+
+### D-038 — El líder tiene identidad de rol (Project Manager) sin nombre propio
+**Fecha:** 2026-07-25
+**Decisión:** el `orchestrator-leader` se presenta ante el humano con la identidad de rol **Project Manager**, sin ningún nombre propio. El prompt del líder (`src/sda/prompts/orchestrator_leader.md`) se reestructuró en secciones estables (identidad, reglas invariantes, tono, memoria, herramientas) separadas de la sección que crece con cada fase nueva (el flujo).
+**Razón:** decisión explícita del usuario. Un nombre de pila para el líder añadiría riesgo de sobre-actuación (el modelo reforzando un personaje) sin ninguna ganancia funcional frente a una identidad de rol clara. El nombre técnico del componente en el código (`orchestrator-leader`) no cambia; esto es solo cómo se presenta en la conversación con el humano.
+**Alternativas consideradas:** darle un nombre propio al líder (descartada explícitamente por el usuario).
+**Impacto:** ref T-032 (`src/sda/prompts/orchestrator_leader.md`). No afecta el nombre técnico `orchestrator-leader` usado en el código/documentación.
 
 <!--
 ### D-XXX — Título breve

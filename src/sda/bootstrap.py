@@ -11,14 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sda import state
+from sda import memory, state
 from sda.resources import load_template
 
 # --- Rutas convenidas dentro de la carpeta del proyecto destino --------------
 CONTEXT_DIR = "_context"
 TEMPLATES_DIR = "_templates"
 PROTOTYPE_DIR = "_prototype"
-PERSISTENCE_DIR = "_persistence"
+# La memoria del proyecto la define y siembra ``sda.memory``; se reexporta aquí
+# porque este módulo es el que describe la estructura del proyecto destino.
+PERSISTENCE_DIR = memory.PERSISTENCE_DIR
 
 SCOPE_FILE = f"{CONTEXT_DIR}/scope.md"
 EXTRACT_TEMPLATE_FILE = f"{TEMPLATES_DIR}/document-extract-temp.md"
@@ -56,11 +58,19 @@ def bootstrap(project_dir: Path) -> bool:
     Devuelve ``True`` si realizó el arranque inicial (no existía estado previo) y
     ``False`` si el proyecto ya estaba inicializado (reanudación).
     """
-    if state.exists(project_dir):
+    ya_inicializado = state.exists(project_dir)
+
+    # La memoria se siembra SIEMPRE, no solo en proyectos nuevos: es idempotente y
+    # nunca pisa contenido, así que además repara los proyectos anteriores a T-029,
+    # cuya carpeta ``_persistence/`` se creaba vacía. Va antes del corte por
+    # reanudación justo para poder alcanzarlos (``idea.md``, Fase 1 Step 2).
+    memory.seed(project_dir)
+
+    if ya_inicializado:
         return False
 
     # Carpetas base.
-    for sub in (CONTEXT_DIR, TEMPLATES_DIR, PROTOTYPE_DIR, PERSISTENCE_DIR):
+    for sub in (CONTEXT_DIR, TEMPLATES_DIR, PROTOTYPE_DIR):
         (project_dir / sub).mkdir(parents=True, exist_ok=True)
 
     # Stub del scope (insumo del humano) y plantilla del entregable.

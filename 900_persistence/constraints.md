@@ -37,6 +37,7 @@
 **Tipo:** técnica
 **Descripción:** `ClaudeSDKSession` conserva contexto entre turnos mientras el mismo objeto `Session`/`ClaudeSDKClient` sigue vivo dentro del proceso (verificado en T-016), pero no existe hoy ningún mecanismo que guarde el historial de mensajes en disco ni un `session_id` que permita al SDK reanudar la misma conversación en una ejecución posterior del harness. Al cerrar el proceso, la conversación se pierde por completo.
 **Origen:** observado durante la verificación en vivo de T-016 (spike de sesión persistente). Da origen a T-020 (persistir/reanudar conversaciones entre ejecuciones, pendiente).
+**Referencia cruzada (2026-07-25):** es la causa raíz de fondo del Defecto A registrado en T-033 (tras un reinicio del proceso, la primera corrección del humano se descarta porque el objeto `Session` interno en memoria vuelve a `None`, y el código infiere erróneamente "primera vez" a partir de ese objeto en vez de mirar el estado en disco). Ver también T-034, L-015.
 
 ### C-006 — Las skills empaquetadas dentro de sda solo se descubren vía plugin local, no por cwd
 **Tipo:** técnica

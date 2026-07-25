@@ -21,4 +21,4 @@ sda = "sda.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-sda = ["prompts/*.md", "templates/*.md"]
+sda = ["prompts/*.md", "templates/*.md", "templates/persistence/*.md"]
