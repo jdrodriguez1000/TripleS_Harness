@@ -25,6 +25,7 @@ from sda.core.provider import Provider
 from sda.core.session import Session
 from sda.core.tool import InProcessTool
 from sda.evaluator import evaluate_draft
+from sda.repl import subagent_line
 from sda.resources import load_prompt
 
 # Sandbox DURO del onboarding-reader (vía ``builtin_tools`` → ``tools`` del SDK):
@@ -219,15 +220,14 @@ class LeaderTools:
         state.save(self._project_dir, st)
 
         print(
-            f"\n[sda] Invocando al agente onboarding-reader "
-            f"(modelo={_ONBOARDING_MODEL}, effort={_ONBOARDING_EFFORT})…"
-        )
-        print(
-            f"[onboarding-reader] Trabajando en la construcción de "
-            f"{bootstrap.EXTRACT_FILE}. Te aviso cuando termine…\n"
+            subagent_line(
+                "onboarding-reader",
+                f"Trabajando en la construcción de {bootstrap.EXTRACT_FILE}. "
+                "Te aviso cuando termine…",
+            )
         )
         resultado = await self._inner.send(instruccion)
-        print("[onboarding-reader] Trabajo terminado.")
+        print(subagent_line("onboarding-reader", "Trabajo terminado."))
 
         # El entregable ya está en disco; se somete a la eval interna (stub por ahora).
         evaluacion = evaluate_draft(self._project_dir / bootstrap.EXTRACT_FILE)

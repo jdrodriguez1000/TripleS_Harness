@@ -8,7 +8,15 @@ y debe respetar este contrato (ver D-009, D-010).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
+
+# Se invoca con cada bloque de texto tal como el modelo lo va generando dentro
+# de un turno (antes y después de sus llamadas a herramientas), para que quien
+# conduzca la sesión pueda mostrarlo en el momento en que ocurre en vez de
+# esperar a que el turno completo termine (necesario para narrar intención
+# antes de lanzar un subagente).
+OnText = Callable[[str], None]
 
 
 @dataclass
@@ -36,8 +44,12 @@ class Session(ABC):
     """
 
     @abstractmethod
-    async def send(self, prompt: str) -> TurnResult:
-        """Envía un turno con ``prompt`` y devuelve su ``TurnResult``."""
+    async def send(self, prompt: str, *, on_text: OnText | None = None) -> TurnResult:
+        """Envía un turno con ``prompt`` y devuelve su ``TurnResult``.
+
+        Si se pasa ``on_text``, se invoca con cada bloque de texto según el modelo
+        lo va generando (streaming), en vez de solo al final del turno.
+        """
         raise NotImplementedError
 
     @abstractmethod

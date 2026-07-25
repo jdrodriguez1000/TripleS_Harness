@@ -98,16 +98,26 @@ class Orchestrator:
             in_process_tools=self._tools.as_in_process_tools(),
         )
 
-        print("[sda] orquestador (líder-agente) — escribe 'salir' para terminar\n")
+        def _mostrar(texto: str) -> None:
+            """Imprime cada bloque de texto del líder según se va generando.
+
+            Un turno puede traer varios bloques (narración antes de invocar una
+            herramienta, resumen después): cada uno se muestra en el momento en que
+            el modelo lo produce, no todos juntos al final del turno. El salto de
+            línea va SIEMPRE antes del bloque (nunca después), para que cada
+            elemento —entrada del humano, narración, estado del subagente, prompt—
+            quede separado por exactamente una línea en blanco, sin duplicados.
+            """
+            print(f"\n{texto}")
 
         try:
             # El líder abre saludando, orientado por el estado actual del proyecto.
-            apertura = await leader.send(_mensaje_apertura(st, recien_creado))
-            print(f"[líder] {apertura.text}\n")
+            # Es el único interlocutor del humano, así que su texto no lleva etiqueta.
+            await leader.send(_mensaje_apertura(st, recien_creado), on_text=_mostrar)
 
             while True:
                 try:
-                    linea = (await prompt_line("[User] > ")).strip()
+                    linea = (await prompt_line("\n> ")).strip()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     break
@@ -116,8 +126,7 @@ class Orchestrator:
                 if linea.lower() in _COMANDOS_SALIDA:
                     break
 
-                resultado = await leader.send(linea)
-                print(f"\n[líder] {resultado.text}\n")
+                await leader.send(linea, on_text=_mostrar)
         finally:
             await self._tools.cerrar()
             await leader.close()

@@ -30,6 +30,24 @@ async def prompt_line(prompt: str) -> str:
     return await anyio.to_thread.run_sync(input, prompt)
 
 
+# Tenue (dim) en vez de un color fijo: se adapta al esquema de la terminal
+# (claro/oscuro) en vez de imponer un gris que podría desentonar. Windows
+# Terminal y PowerShell 7+ interpretan estos códigos de forma nativa.
+_DIM = "\x1b[2m"
+_RESET = "\x1b[0m"
+
+
+def subagent_line(nombre: str, texto: str) -> str:
+    """Formatea una línea de estado de un subagente, distinguible del líder.
+
+    Indentada, marcada con ``⎿`` (el mismo símbolo que esta terminal usa para
+    resultados subordinados de una herramienta) y en tono tenue, para que se lea
+    como "trabajo de fondo" y no como si el humano estuviera hablando con otro
+    interlocutor. Incluye el salto de línea que la separa del bloque anterior.
+    """
+    return f"\n  {_DIM}⎿ [{nombre}] {texto}{_RESET}"
+
+
 def forzar_utf8() -> None:
     """Reconfigura la consola a UTF-8 (ver ``_forzar_utf8``). Alias público."""
     _forzar_utf8()

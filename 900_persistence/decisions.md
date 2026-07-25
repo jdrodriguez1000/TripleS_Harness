@@ -35,6 +35,8 @@
 - [D-029 — La señal humana de "continuar" pasa a intención en lenguaje natural, validada por herramienta determinista](#d-029--la-señal-humana-de-continuar-pasa-a-intención-en-lenguaje-natural-validada-por-herramienta-determinista)
 - [D-030 — D-026 a D-029 quedan firmes como decisiones implementadas y verificadas](#d-030--d-026-a-d-029-quedan-firmes-como-decisiones-implementadas-y-verificadas)
 - [D-031 — El sandbox real por-agente se implementa con `builtin_tools` (`tools=` del SDK), no con `allowed_tools`](#d-031--el-sandbox-real-por-agente-se-implementa-con-builtin_tools-tools-del-sdk-no-con-allowed_tools)
+- [D-032 — El líder es el único interlocutor visible en terminal, con streaming real de texto](#d-032--el-líder-es-el-único-interlocutor-visible-en-terminal-con-streaming-real-de-texto)
+- [D-033 — El merge de `t-027-sesion-lider` a master queda bloqueado hasta resolver T-030](#d-033--el-merge-de-t-027-sesion-lider-a-master-queda-bloqueado-hasta-resolver-t-030)
 
 ## Detalle
 
@@ -288,6 +290,20 @@ TripleS_Harness/
 **Razón:** se descubrió (ver L-013) que `allowed_tools` bajo `permission_mode="bypassPermissions"` no restringe el toolset, solo auto-aprueba; por lo tanto el modelo de "manos atadas" que T-024/T-027/D-026 asumían para el sandbox del líder y del onboarding-reader era nominal, no real. `tools=`/`disallowed_tools=` es el mecanismo verificado que sí restringe de verdad qué herramientas nativas existen para una sesión.
 **Alternativas consideradas:** mantener `allowed_tools` como mecanismo de sandbox (descartada: no cumple la función de seguridad que se le atribuía); usar `disallowed_tools` (denylist) en vez de `builtin_tools`/`tools=` (allowlist) (descartada: una allowlist explícita por agente es más segura por defecto que una denylist que exige enumerar todo lo que se quiere prohibir).
 **Impacto:** ref T-028, D-026 (nota: la afirmación de sandbox de T-024/onboarding-reader también era nominal hasta este hardening), L-013.
+
+### D-032 — El líder es el único interlocutor visible en terminal, con streaming real de texto
+**Fecha:** 2026-07-25
+**Decisión:** se retiran las etiquetas `[sda]`/`[líder]`/`[User]` y el banner de arranque fijo de la terminal; el `orchestrator-leader` queda como el único interlocutor visible, sin prefijos, y el prompt del humano se simplifica de `[User] > ` a `> `. Se retira también la exposición en pantalla de modelo/effort del onboarding-reader. Las líneas de estado de subagentes (p. ej. "Trabajando en...", "Trabajo terminado.") se mantienen pero indentadas con el helper `subagent_line()` (símbolo `⎿`, color ANSI dim) para distinguirlas visualmente del líder sin usar etiquetas de texto. Se agrega además streaming real: `Session.send()` (contrato `core/session.py`) acepta un callback opcional `on_text` (tipo `OnText`), implementado en `ClaudeSDKSession.send()` y usado en `orchestrator.py` para imprimir cada bloque de texto del líder a medida que se genera, en vez de esperar el turno completo.
+**Razón:** D-024 (prefijos por hablante) resolvió la ambigüedad de quién habla, pero a costo de una experiencia robótica con etiquetas técnicas visibles; con un solo líder conversacional como interlocutor principal, el usuario prefiere una experiencia de chat natural, y el streaming permite ver la intención del líder ("voy a trabajar en...") antes de que lance el subagente, en vez de esperar en silencio a que termine todo el turno.
+**Alternativas consideradas:** mantener las etiquetas `[sda]/[líder]/[User]` de D-024 indefinidamente (descartada por preferencia explícita de UX del usuario, ahora que hay un líder conversacional real y no un bucle Python plano); no implementar streaming y mantener impresión al final del turno completo (descartada porque no comunica la intención del líder mientras trabaja).
+**Impacto:** ref archivos modificados: `src/sda/core/session.py`, `src/sda/providers/claude_sdk.py`, `src/sda/orchestrator.py`, `src/sda/repl.py`, `src/sda/tools/leader_tools.py`. Introduce el riesgo documentado en T-030 (ventana de entrelazado visual ampliada por el streaming).
+
+### D-033 — El merge de `t-027-sesion-lider` a master queda bloqueado hasta resolver T-030
+**Fecha:** 2026-07-25
+**Decisión:** además del bloqueo ya existente desde T-028 (merge pospuesto por decisión del usuario), se agrega una condición explícita: el merge de la rama `t-027-sesion-lider` a `master` no debe hacerse hasta que T-030 (entrelazado visual entre streaming y teclado del usuario) quede resuelto.
+**Razón:** el streaming introducido en D-032 amplió la ventana de riesgo de que el tecleo del humano se entrelace visualmente con la salida del programa en terminal (ver diagnóstico en T-030); el usuario considera que ese problema de UX debe cerrarse antes de llevar esta rama a producción (master).
+**Alternativas consideradas:** hacer merge igual y arreglar T-030 después en master directamente (descartada explícitamente por el usuario).
+**Impacto:** ref T-028, T-030. Bloquea el ítem "evaluar y, si convence, hacer merge de `t-027-sesion-lider` a master" en `progress.md` con una condición adicional.
 
 <!--
 ### D-XXX — Título breve

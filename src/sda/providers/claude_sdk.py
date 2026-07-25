@@ -21,7 +21,7 @@ from claude_agent_sdk import (
 )
 
 from sda.core.provider import Provider
-from sda.core.session import Session, TurnResult
+from sda.core.session import OnText, Session, TurnResult
 from sda.core.tool import InProcessTool
 
 # Variables de entorno que, si están presentes, harían que el SDK autentique con
@@ -81,8 +81,15 @@ class ClaudeSDKSession(Session):
         self._options = options
         self._client: ClaudeSDKClient | None = None
 
-    async def send(self, prompt: str) -> TurnResult:
-        """Envía un turno y devuelve el texto acumulado de la respuesta."""
+    async def send(self, prompt: str, *, on_text: OnText | None = None) -> TurnResult:
+        """Envía un turno y devuelve el texto acumulado de la respuesta.
+
+        Un turno puede incluir varias rondas de texto intercaladas con llamadas a
+        herramientas (p. ej. el líder narra su intención, invoca una herramienta y
+        luego resume el resultado). Si se pasa ``on_text``, cada bloque de texto se
+        entrega tal como llega, para que la narración se muestre antes de que la
+        herramienta se ejecute en vez de quedar atrapada hasta el final del turno.
+        """
         if self._client is None:
             self._client = ClaudeSDKClient(self._options)
             # connect() sin prompt inicial: cada turno se manda con query().
@@ -96,6 +103,8 @@ class ClaudeSDKSession(Session):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         partes.append(block.text)
+                        if on_text is not None:
+                            on_text(block.text)
 
         return TurnResult(text="".join(partes))
 
